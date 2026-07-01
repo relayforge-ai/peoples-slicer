@@ -3,6 +3,7 @@
 > **Version:** v1.0 · **Date:** 2026-07-01 · **Status:** DRAFT — awaiting Ryan's review
 > **Owner:** Ryan Anderson · **Author:** Claude (Opus 4.8), brainstormed with Ryan
 > **Repo:** `~/peoples-slicer` (public, MIT) · **Canonical docs home:** this repo (Notion mirrors)
+> **Umbrella / mission:** The People's Slicer · **Product / harness:** **Telchar's Forge** (CLI: `forge`)
 
 ---
 
@@ -31,6 +32,23 @@ from GitHub / the site / YouTube, keep using Orca, add the one missing layer. Lo
 barrier to entry — which is exactly what makes it a **customer-acquisition funnel** for
 telchar.relayforge.tools: someone pulls the tool because their AD5X won't print multicolor
 headless, it *just works*, and every touchpoint (README, `--help`, viewer footer) points home.
+
+### Brand architecture (the funnel, made explicit)
+
+- **The People's Slicer** = the umbrella / mission: the MIT project, the GitHub banner, the
+  "slicing-for-everyone, agent-first" movement. Welcoming, community-facing — the reason a stranger
+  stars it.
+- **Telchar's Forge** = the product you run: the harness that *forges* a sliced file into a finished
+  print (Telchar the smith → the forge where raw becomes finished). CLI command: `forge`. This
+  carries the Telchar brand into every session and points home.
+- Headline: **"The People's Slicer — powered by Telchar's Forge."** Tagline: *"you slice, it does
+  the rest."*
+
+**Funnel touchpoints (tasteful — a tool that feels like adware stops being a funnel):**
+README hero + `forge --help` banner (*"made in the Telchar studio → telchar.relayforge.tools"*) ·
+viewer footer (*"want a lobster to run your printer? → site"*) · one gentle line on print-complete
+pointing to the studio/catalog · GitHub sponsor/org link → RelayForge · and the **Telchar-the-smith
+capstone print is itself branding** — the namesake on the shelf in every stream shot.
 
 ---
 
@@ -113,7 +131,7 @@ private config that *consumes* the public engine.**
 
 ```
 PUBLIC  ~/peoples-slicer   (MIT — everyone runs this)
-  pslice/
+  forge/
     discover.py     LAN scan + printer fingerprint + credential store (enter once)
     classifier.py   gcode header/footer → {printer, material, colors, est_time, est_grams, bed_fit}
     review.py       deterministic profile/rule lint → suggestions the user accepts/nudges
@@ -126,7 +144,7 @@ PUBLIC  ~/peoples-slicer   (MIT — everyone runs this)
       ad5x.py       8899 single + 8898 status + multicolor IFS map  (from ad5x_tools)
       klipper.py    Moonraker upload + start + FIRMWARE_RESTART recovery
     api.py          library + stubbed HTTP API (the Telchar-agent seam)
-    cli.py          `pslice discover | review | send | status | watch`
+    cli.py          `forge discover | review | send | status | watch`
   viewer/           simple project viewer (queued/printing, drop target)
   docs/
     playbooks/{bambu-a2l,ad5x,ender-klipper}.md   the per-printer screenplay
@@ -137,7 +155,7 @@ PUBLIC  ~/peoples-slicer   (MIT — everyone runs this)
 PRIVATE ~/print-router (or a config repo)   (Ryan's Telchar deployment)
   config: LAN IPs, access codes, SKU→printer routing, Mongo write-through,
           Drive (03_ready_to_print contract), YT flow, Telegram alerts
-  → imports the public pslice engine; adds nothing the public tool needs
+  → imports the public forge engine; adds nothing the public tool needs
 ```
 
 **The key abstraction is the adapter contract** (`base.py`): three printers, one interface
@@ -202,7 +220,7 @@ each landmine gets a **detection** and a **deterministic resolution** so Gemini 
 |----------|-----------|------------|
 | Flaky WiFi silently **cancels uploads** mid-transfer | upload byte count < file size / no confirm | persistent `curl --retry`; verify size post-upload before start; improve printer WiFi |
 | `forge/bambu.py` explicit-FTPS **hangs** + `use_ams:false` | legacy path | use the `send_bambu.py`-derived adapter (implicit-FTPS + MQTT + AMS map) |
-| Build volume assumed ~256³ | — | **CONFIRM** exact volume (open decision) before bed-fit trust |
+| Build volume: **height 325 mm** (confirmed); X/Y ~256×256 (confirm) | — | bed-fit uses 256×256×**325**; confirm X/Y before trusting tall-model fit |
 
 ### AD5X — flexible/TPU machine, multicolor via IFS station (the keystone)
 | Landmine | Detection | Resolution |
@@ -290,7 +308,7 @@ week, while hands are on hardware, freeze real truth into `fixtures/`:**
 - [x] **Mini PC basics:** `ganymede`, Windows 11 24H2 (10.0.26100.3476), LAN `192.168.4.54`,
       Tailscale `100.76.69.43`. *Still needed:* Python version, is Mongo installed/running, bring it
       **online** (currently "not connected", last seen Jun 29).
-- [ ] Bambu A2L exact build volume (resolve the open item).
+- [x] Bambu A2L build **height = 325 mm** (Ryan, 2026-07-01). *Still needed:* X/Y (likely 256×256).
 
 Capture these and three agents can build + test the entire harness against recorded truth for three
 weeks; validate on real metal night-1 home.
@@ -301,7 +319,7 @@ weeks; validate on real metal night-1 home.
 
 - **Phase 0 (now→Sun, hardware):** capture fixtures (above); bring ganymede online.
 - **Phase 1 (vacation, agents, hardware-less):** extract print-router + scattered adapters → public
-  `pslice` engine; add discover + deterministic review + guardian hook + viewer; write the
+  `forge` engine; add discover + deterministic review + guardian hook + viewer; write the
   screenplay; tests against fixtures + dry-run mode; **every touchpoint points home to the site**;
   start marketing (README, GitHub, YT).
 - **Phase 2 (home, hardware):** validate on real metal; **Telchar-the-smith ceremonial first
@@ -328,7 +346,7 @@ weeks; validate on real metal night-1 home.
 
 ## 13. Success / definition of done (v0.1)
 
-1. One `pslice` CLI discovers and connects all three printers on the LAN (enter code once).
+1. One `forge` CLI discovers and connects all three printers on the LAN (enter code once).
 2. Drop an Orca-exported file → deterministic review → headless send → print, **zero parameter
    loss**, on all three printers (validated night-1 home; fixtures green while away).
 3. AD5X **multicolor headless** works via auto-built IFS map (the keystone), covered by a
@@ -344,14 +362,15 @@ weeks; validate on real metal night-1 home.
 1. **Public/private split** — confirm: generic engine goes public in `peoples-slicer`; `print-router`
    becomes the private config/deployment that imports it. (Recommended.) Alternative: keep
    `print-router` private and publish only a cleaned subset.
-2. **Name/tagline** — keep "The People's Slicer" brand, resolve the "it's not a slicer" tension with
-   the tagline *"you slice, it does the rest."* (Recommended — no rename.)
+2. **Name/brand** — RESOLVED (Ryan, 2026-07-01): umbrella **The People's Slicer** + product
+   **Telchar's Forge** (CLI `forge`), tagline *"you slice, it does the rest."* Minor open item: if
+   the `forge` binary name collides on users' machines, fall back to `telforge`.
 3. **Mongo in public engine?** — No: keep Mongo write-through private; public engine emits
    `jobs.jsonl` and a pluggable event sink. (Recommended.)
 4. **ganymede runtime model** — native Windows service (NSSM) vs WSL2. Native is more "mom-simple"
    (no WSL install); WSL2 gives the Linux tooling the router was built against. (Lean: **native +
    `watchdog`**, keep the engine OS-agnostic.)
-5. **Bambu A2L build volume** — confirm exact value (Phase 0).
+5. **Bambu A2L build volume** — height **325 mm** confirmed; X/Y still to confirm (likely 256×256).
 6. **Viewer scope** — read-only status + drop target for v0.1, or minimal controls too?
 
 ---
