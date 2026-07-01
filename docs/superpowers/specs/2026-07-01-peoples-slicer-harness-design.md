@@ -167,7 +167,8 @@ community contributor add a Prusa/Klipper variant without touching the core.
 ### Reference deployment host — `ganymede` (Windows 11)
 
 The mini PC on the LAN (arrived 2026-06-28) is the reference host: **`ganymede`, Windows 11 24H2**,
-LAN `192.168.4.54` (same /24 as the printers), Tailscale `100.76.69.43` on `tailffa66f.ts.net`.
+on the same LAN /24 as the printers, reachable over Tailscale. (Real LAN/Tailscale addresses + the
+tailnet name live in the private deployment config — never this public repo.)
 "A cheap mini PC + Gemini + our harness = a print shop" made literal — and Windows is *right* for
 the mom-test, because that is what hobbyists and Orca already run.
 
@@ -305,9 +306,9 @@ week, while hands are on hardware, freeze real truth into `fixtures/`:**
 - [ ] Moonraker upload → `print/start` sequence; the "Lost communication with MCU" 400 + recovery.
 - [ ] The 2026-06-29→30 failure cases frozen as **regression fixtures** (mono-without-IFS, silent
       cancel, MCU drop).
-- [x] **Mini PC basics:** `ganymede`, Windows 11 24H2 (10.0.26100.3476), LAN `192.168.4.54`,
-      Tailscale `100.76.69.43` — **online + connected to Tailscale as of 2026-07-01** ✓. *Still
-      needed:* Python version, is Mongo installed/running.
+- [x] **Mini PC basics:** `ganymede`, Windows 11 24H2 (10.0.26100.3476) — **online + connected to
+      Tailscale as of 2026-07-01** ✓ (LAN/Tailscale addresses recorded in the private deployment
+      config, not this public repo). *Still needed:* Python version, is Mongo installed/running.
 - [x] Bambu A2L build **height = 325 mm** (Ryan, 2026-07-01). *Still needed:* X/Y (likely 256×256).
 
 Capture these and three agents can build + test the entire harness against recorded truth for three

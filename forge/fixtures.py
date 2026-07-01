@@ -2,6 +2,9 @@
 
 Layout:  fixtures/<printer>/<name>.json   (parsed)  |  <name>.<ext>  (raw text)
 Printers: bambu_a2l | ad5x | ender
+
+NOTE: FIXTURES_ROOT assumes a source checkout (fixtures/ beside the package). This is a
+dev/test harness, not a runtime dependency — do not import it from installed-package code paths.
 """
 from __future__ import annotations
 

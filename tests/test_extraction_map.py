@@ -1,6 +1,8 @@
 from pathlib import Path
 
-MAP = Path("docs/EXTRACTION_MAP.md")
+# Anchor to the repo (this file's grandparent) so the test passes regardless of the
+# working directory pytest is invoked from — matters on Windows/CI runners.
+MAP = Path(__file__).resolve().parents[1] / "docs" / "EXTRACTION_MAP.md"
 
 
 def test_map_exists_and_covers_every_engine_module():
