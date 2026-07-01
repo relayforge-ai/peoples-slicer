@@ -306,8 +306,8 @@ week, while hands are on hardware, freeze real truth into `fixtures/`:**
 - [ ] The 2026-06-29→30 failure cases frozen as **regression fixtures** (mono-without-IFS, silent
       cancel, MCU drop).
 - [x] **Mini PC basics:** `ganymede`, Windows 11 24H2 (10.0.26100.3476), LAN `192.168.4.54`,
-      Tailscale `100.76.69.43`. *Still needed:* Python version, is Mongo installed/running, bring it
-      **online** (currently "not connected", last seen Jun 29).
+      Tailscale `100.76.69.43` — **online + connected to Tailscale as of 2026-07-01** ✓. *Still
+      needed:* Python version, is Mongo installed/running.
 - [x] Bambu A2L build **height = 325 mm** (Ryan, 2026-07-01). *Still needed:* X/Y (likely 256×256).
 
 Capture these and three agents can build + test the entire harness against recorded truth for three
