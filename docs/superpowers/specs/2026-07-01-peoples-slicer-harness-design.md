@@ -357,21 +357,21 @@ weeks; validate on real metal night-1 home.
 
 ---
 
-## 14. Open decisions (resolve in review)
+## 14. Decisions (resolved 2026-07-01; residuals noted)
 
-1. **Public/private split** — confirm: generic engine goes public in `peoples-slicer`; `print-router`
-   becomes the private config/deployment that imports it. (Recommended.) Alternative: keep
-   `print-router` private and publish only a cleaned subset.
+1. **Public/private split** — RESOLVED: generic engine goes public in `peoples-slicer` (Telchar's
+   Forge); `print-router` becomes the private config/deployment that imports it — keeps LAN IPs,
+   Mongo, Drive, YT flow out of the public repo.
 2. **Name/brand** — RESOLVED (Ryan, 2026-07-01): umbrella **The People's Slicer** + product
    **Telchar's Forge** (CLI `forge`), tagline *"you slice, it does the rest."* Minor open item: if
    the `forge` binary name collides on users' machines, fall back to `telforge`.
-3. **Mongo in public engine?** — No: keep Mongo write-through private; public engine emits
-   `jobs.jsonl` and a pluggable event sink. (Recommended.)
-4. **ganymede runtime model** — native Windows service (NSSM) vs WSL2. Native is more "mom-simple"
-   (no WSL install); WSL2 gives the Linux tooling the router was built against. (Lean: **native +
-   `watchdog`**, keep the engine OS-agnostic.)
+3. **Mongo in public engine?** — RESOLVED: NO. Mongo write-through stays private; the public engine
+   emits `jobs.jsonl` + a pluggable event sink the Telchar deployment wires Mongo into.
+4. **ganymede runtime model** — RESOLVED: **native Windows + `watchdog`** (no WSL install = more
+   mom-simple); the Python engine stays OS-agnostic so power users can run it on Linux.
 5. **Bambu A2L build volume** — height **325 mm** confirmed; X/Y still to confirm (likely 256×256).
-6. **Viewer scope** — read-only status + drop target for v0.1, or minimal controls too?
+6. **Viewer scope** — RESOLVED: v0.1 = read-only status + drop target only; live controls ride the
+   `/drive` PTZ pattern in a later version.
 
 ---
 
