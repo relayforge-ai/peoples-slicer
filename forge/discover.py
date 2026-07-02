@@ -77,7 +77,14 @@ def probe_ad5x(host: str, http_port: int = 8898) -> DiscoveredPrinter | None:
     )
     if body is None:
         return None
-    if "detail" in body or "serialNumber" in str(body).lower() or "checkcode" in str(body).lower():
+    # Authenticated /detail returns detail; unauthenticated calls still prove AD5X JSON API.
+    ad5x_shaped = (
+        "detail" in body
+        or body.get("code") is not None
+        or "serialnumber" in str(body).lower()
+        or "checkcode" in str(body).lower()
+    )
+    if ad5x_shaped:
         model = ""
         if isinstance(body.get("detail"), dict):
             model = body["detail"].get("machineName") or body["detail"].get("model") or ""
