@@ -26,10 +26,8 @@ def test_build_mappings_from_fixture():
 
 
 def test_status_uses_injected_detail_fetcher():
-    state = fixtures.load("ad5x", "ifs_slot_state")
-
     def fetcher():
-        return state
+        return {"status": "ready"}
 
     adapter = AD5XAdapter("printer.local", "SERIAL", "CHECK", detail_fetcher=fetcher)
     assert adapter.status() == "idle"

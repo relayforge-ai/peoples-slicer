@@ -1,23 +1,8 @@
 {
   "result": {
-    "eventtime": 468438.916883659,
     "status": {
-      "print_stats": {
-        "filename": "mini twisty fidget dragon scale egg 12.gcode",
-        "total_duration": 19902.19838987902,
-        "print_duration": 19747.81730217405,
-        "filament_used": 11927.392030025796,
-        "state": "printing",
-        "message": "",
-        "info": {
-          "total_layer": null,
-          "current_layer": null
-        }
-      },
-      "webhooks": {
-        "state": "ready",
-        "state_message": "Printer is ready"
-      }
+      "print_stats": {"state": "standby"},
+      "webhooks": {"state": "ready"}
     }
   }
 }
