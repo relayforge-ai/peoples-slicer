@@ -11,7 +11,13 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     cfg: dict[str, Any] = {"printers": {}}
     config_path = path or os.environ.get("FORGE_CONFIG")
     if config_path and Path(config_path).exists():
-        cfg.update(json.loads(Path(config_path).read_text()))
+        try:
+            loaded = json.loads(Path(config_path).read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"malformed forge config JSON: {config_path}") from exc
+        if not isinstance(loaded, dict):
+            raise ValueError(f"forge config must be a JSON object: {config_path}")
+        cfg.update(loaded)
 
     printers = cfg.setdefault("printers", {})
     if os.environ.get("AD5X_HOST"):
