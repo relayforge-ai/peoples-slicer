@@ -74,9 +74,9 @@ self-mapping.** Pillars #1 and #2, proven.
 
 ## Status & Roadmap
 
-- ✅ **Phase 1 (the unlock):** headless send + zero-param multicolor for all three printers. *Mostly done.*
-- ⏳ **Phase 2 (the fork):** stand up the MIT repo; fold the adapters into one CLI; add a simple project viewer.
-- ⏳ **Phase 3 (the product):** one-command install; "point a lobster at a printer" onboarding; the mom test.
+- ✅ **Phase 1 (the unlock):** headless send + zero-param multicolor for all three printers. *Proven live.*
+- ✅ **Phase 2 (the fork):** MIT repo with `forge` engine — classifier, queue, dispatcher, AD5X/Bambu/Klipper adapters, Amos guardian, `forge send`/`status` CLI. *55 tests green.*
+- ⏳ **Phase 3 (the product):** discover + review + viewer + one-command install; the mom test.
 
 ## Credits
 
