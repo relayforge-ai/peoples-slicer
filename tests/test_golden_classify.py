@@ -18,7 +18,8 @@ def test_bambu_a2l_golden_classifies():
     path = ROOT / "bambu_a2l" / "golden.gcode"
     info = classify_file(str(path))
     assert info.printer == "bambu_a2l"
-    assert info.colors == 4
+    # German Shepherd hatchling batch (gs4.gcode.3mf): tan + black + white.
+    assert info.colors == 3
 
 
 def test_ad5x_multicolor_golden_classifies():

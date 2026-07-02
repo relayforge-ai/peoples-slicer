@@ -20,6 +20,8 @@ class JobInfo:
 _PRINTER_MAP: list[tuple[str, str]] = [
     ("flashforge ad5x", "ad5x"),
     ("bambu lab a2l", "bambu_a2l"),
+    ("bambu lab p1s", "bambu_a2l"),
+    ("p1s", "bambu_a2l"),
     ("bambu lab a1 mini", "bambu_a1mini"),
     ("a1 mini", "bambu_a1mini"),
     ("a2l", "bambu_a2l"),

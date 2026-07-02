@@ -32,3 +32,21 @@ def test_classify_file_reads_footer_config(tmp_path):
     assert info.material == "TPU"
     assert info.colors == 1
     assert info.est_grams == 33.53
+
+
+def test_classify_file_scans_huge_gcode_when_config_sits_in_the_middle_gap(tmp_path):
+    """BambuStudio can park CONFIG metadata between our head and tail windows."""
+    body = [f"G1 X{i % 100} E{i * 0.01:.2f}" for i in range(200_000)]
+    config = [
+        "; CONFIG_BLOCK_START",
+        "; printer_model = Bambu Lab P1S",
+        "; printer_settings_id = Bambu Lab P1S 0.4 nozzle",
+        "; filament_type = PLA;PLA;PLA",
+        "; filament_colour = #AE835B;#000000;#FFFFFF",
+        "; CONFIG_BLOCK_END",
+    ]
+    p = tmp_path / "huge.gcode"
+    p.write_text("\n".join(["; HEADER_BLOCK_START", "; EXECUTABLE_BLOCK_START", *config, *body]))
+    info = classify_file(str(p))
+    assert info.printer == "bambu_a2l"
+    assert info.colors == 3

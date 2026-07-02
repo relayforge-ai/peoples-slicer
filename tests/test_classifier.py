@@ -83,6 +83,11 @@ def test_bambu_a2l_header_routes_to_bambu_a2l():
     assert classify(h).printer == "bambu_a2l"
 
 
+def test_bambu_p1s_header_routes_to_bambu_a2l():
+    h = "; printer_model = Bambu Lab P1S\n; filament_type = PLA\n"
+    assert classify(h).printer == "bambu_a2l"
+
+
 def test_bambu_generic_header_routes_to_bambu():
     assert classify(BAMBU_HEADER).printer == "bambu"
 
