@@ -1,0 +1,11 @@
+{
+  "status": "ready",
+  "matlStationInfo": {
+    "slotInfos": [
+      {"slotId": 1, "materialColor": "#FF0000", "materialName": "PLA Red"},
+      {"slotId": 2, "materialColor": "#00FF00", "materialName": "PLA Green"},
+      {"slotId": 3, "materialColor": "#0000FF", "materialName": "PLA Blue"},
+      {"slotId": 4, "materialColor": "#FFFF00", "materialName": "PLA Yellow"}
+    ]
+  }
+}

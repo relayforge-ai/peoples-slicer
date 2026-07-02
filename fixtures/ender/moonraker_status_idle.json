@@ -1,0 +1,8 @@
+{
+  "result": {
+    "status": {
+      "print_stats": {"state": "standby"},
+      "webhooks": {"state": "ready"}
+    }
+  }
+}

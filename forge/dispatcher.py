@@ -20,10 +20,11 @@ def _hash_file(path: str) -> str:
 
 
 class Dispatcher:
-    def __init__(self, adapters: dict, queue: JobQueue, store=None):
+    def __init__(self, adapters: dict, queue: JobQueue, store=None, guardian=None):
         self.adapters = adapters
         self.queue = queue
         self.store = store
+        self.guardian = guardian
         self.events: list[dict] = []
 
     def _emit(self, event: dict) -> dict:
@@ -39,7 +40,7 @@ class Dispatcher:
             ids.add(active["id"])
         return job_id in ids
 
-    def submit(self, path: str) -> dict:
+    def submit(self, path: str, **extra) -> dict:
         info = classify_file(path)
         name = os.path.basename(path)
 
@@ -55,10 +56,18 @@ class Dispatcher:
             "id": job_id, "name": name, "printer": printer, "path": path,
             "material": info.material, "colors": info.colors,
             "est_seconds": info.est_seconds, "est_grams": info.est_grams,
+            **extra,
         }
 
         if self._known(printer, job_id):
             return self._emit({**job, "job_id": job_id, "state": "duplicate"})
+
+        if self.guardian is not None:
+            approved, reason = self.guardian.approve(job)
+            if not approved:
+                return self._emit(
+                    {**job, "job_id": job_id, "state": "vetoed", "reason": reason}
+                )
 
         adapter = self.adapters[printer]
         can_send_now = (

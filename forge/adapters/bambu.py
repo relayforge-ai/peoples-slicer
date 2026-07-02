@@ -1,0 +1,254 @@
+"""Bambu A2L adapter — implicit FTPS upload + MQTT start with AMS mapping.
+
+Uses implicit FTPS on :990 (TLS from connect) and MQTT on :8883.
+Bambu ships a broken cert chain; CERT_NONE is standard for LAN integrations.
+"""
+from __future__ import annotations
+
+import json
+import ssl
+import ftplib
+import threading
+import zipfile
+from pathlib import Path
+from typing import Callable, Optional
+
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:  # pragma: no cover - optional until bambu extra installed
+    mqtt = None  # type: ignore
+
+MqttPublisher = Callable[[dict, bool], Optional[dict]]
+FtpsUploader = Callable[[str, str], str]
+
+
+class ImplicitFTP_TLS(ftplib.FTP_TLS):
+    """Bambu uses implicit FTPS on :990 (TLS from connect)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._sock = None
+
+    @property
+    def sock(self):
+        return self._sock
+
+    @sock.setter
+    def sock(self, value):
+        if value is not None and not isinstance(value, ssl.SSLSocket):
+            value = self.context.wrap_socket(value)
+        self._sock = value
+
+
+class BambuAdapter:
+    key = "bambu"
+
+    def __init__(
+        self,
+        host: str,
+        access_code: str,
+        serial: str,
+        *,
+        ftps_port: int = 990,
+        mqtt_port: int = 8883,
+        upload_retries: int = 3,
+        mqtt_publisher: MqttPublisher | None = None,
+        ftps_uploader: FtpsUploader | None = None,
+    ):
+        if not host or not access_code or not serial:
+            raise ValueError("host, access_code, and serial are required")
+        self.host = host
+        self.access_code = access_code
+        self.serial = serial
+        self.ftps_port = ftps_port
+        self.mqtt_port = mqtt_port
+        self.upload_retries = max(1, upload_retries)
+        self._mqtt_publisher = mqtt_publisher
+        self._ftps_uploader = ftps_uploader
+        self._seq = 0
+        self.topic_pub = f"device/{serial}/request"
+        self.topic_sub = f"device/{serial}/report"
+
+    def _next_seq(self) -> str:
+        self._seq += 1
+        return str(self._seq)
+
+    @staticmethod
+    def _tls_context() -> ssl.SSLContext:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    def _upload(self, local_path: str, remote_name: str) -> str:
+        if self._ftps_uploader is not None:
+            return self._ftps_uploader(local_path, remote_name)
+
+        last_err: Exception | None = None
+        for _ in range(self.upload_retries):
+            try:
+                ctx = self._tls_context()
+                ftp = ImplicitFTP_TLS(context=ctx)
+                ftp.connect(self.host, self.ftps_port, timeout=120)
+                ftp.login("bblp", self.access_code)
+                ftp.prot_p()
+                with open(local_path, "rb") as fh:
+                    ftp.storbinary(f"STOR /{remote_name}", fh)
+                ftp.quit()
+                return f"/{remote_name}"
+            except Exception as exc:  # noqa: BLE001 - retry landmine
+                last_err = exc
+        raise RuntimeError(f"FTPS upload failed after {self.upload_retries} tries") from last_err
+
+    def _publish(self, payload: dict, wait_reply: bool = False) -> Optional[dict]:
+        if self._mqtt_publisher is not None:
+            return self._mqtt_publisher(payload, wait_reply)
+        if mqtt is None:
+            raise RuntimeError("paho-mqtt is required for BambuAdapter (pip install paho-mqtt)")
+
+        result: list[Optional[dict]] = [None]
+        got_reply = threading.Event()
+
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        client.username_pw_set("bblp", self.access_code)
+        client.tls_set_context(self._tls_context())
+        connected = threading.Event()
+
+        def on_connect(c, _u, _f, rc, _p=None):
+            ok = (rc == 0) if isinstance(rc, int) else (str(rc) == "Success")
+            if ok:
+                c.subscribe(self.topic_sub)
+                connected.set()
+
+        if wait_reply:
+            def on_message(_c, _u, msg):
+                try:
+                    data = json.loads(msg.payload)
+                    if "print" in data:
+                        result[0] = data
+                        got_reply.set()
+                except json.JSONDecodeError:
+                    pass
+
+            client.on_message = on_message
+
+        client.on_connect = on_connect
+        client.connect(self.host, self.mqtt_port, keepalive=30)
+        client.loop_start()
+        if not connected.wait(8):
+            client.loop_stop()
+            client.disconnect()
+            return None
+
+        client.publish(self.topic_pub, json.dumps(payload))
+        if wait_reply:
+            got_reply.wait(10)
+
+        client.loop_stop()
+        client.disconnect()
+        return result[0]
+
+    def _fetch_print_state(self) -> dict:
+        result: list[dict] = [{}]
+        got = threading.Event()
+        if mqtt is None:
+            return {}
+
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        client.username_pw_set("bblp", self.access_code)
+        client.tls_set_context(self._tls_context())
+        connected = threading.Event()
+
+        def on_connect(c, _u, _f, rc, _p=None):
+            ok = (rc == 0) if isinstance(rc, int) else (str(rc) == "Success")
+            if ok:
+                c.subscribe(self.topic_sub)
+                connected.set()
+
+        def on_message(_c, _u, msg):
+            try:
+                data = json.loads(msg.payload)
+                if "print" in data:
+                    result[0] = data["print"]
+                    got.set()
+            except json.JSONDecodeError:
+                pass
+
+        client.on_message = on_message
+        client.on_connect = on_connect
+        client.connect(self.host, self.mqtt_port, keepalive=30)
+        client.loop_start()
+        if not connected.wait(8):
+            client.loop_stop()
+            client.disconnect()
+            return {}
+
+        client.publish(
+            self.topic_pub,
+            json.dumps(
+                {
+                    "pushing": {
+                        "sequence_id": self._next_seq(),
+                        "command": "start",
+                        "version": 1,
+                        "push_target": 1,
+                    }
+                }
+            ),
+        )
+        got.wait(8)
+        client.loop_stop()
+        client.disconnect()
+        return result[0]
+
+    def status(self) -> str:
+        try:
+            state = self._fetch_print_state()
+            if not state:
+                return "offline"
+            gcode_state = state.get("gcode_state", "IDLE")
+            if gcode_state in ("RUNNING", "PAUSE"):
+                return "printing"
+            return "idle"
+        except Exception:  # noqa: BLE001
+            return "offline"
+
+    def send(
+        self,
+        gcode_path: str,
+        start: bool = True,
+        *,
+        ams_mapping: list[int] | None = None,
+        subtask_name: str | None = None,
+    ) -> str:
+        path = Path(gcode_path)
+        if path.suffix == ".3mf" or path.name.endswith(".gcode.3mf"):
+            with zipfile.ZipFile(gcode_path) as zf:
+                if not any(n.endswith("plate_1.gcode") for n in zf.namelist()):
+                    raise ValueError("no Metadata/plate_1.gcode in 3mf — not sliced?")
+
+        remote_name = path.name
+        remote = self._upload(gcode_path, remote_name)
+        if not start:
+            return remote_name
+
+        mapping = ams_mapping if ams_mapping is not None else [0]
+        payload = {
+            "print": {
+                "sequence_id": self._next_seq(),
+                "command": "project_file",
+                "param": "Metadata/plate_1.gcode",
+                "url": f"ftp://{remote}",
+                "subtask_name": subtask_name or path.stem,
+                "use_ams": True,
+                "ams_mapping": mapping,
+                "bed_type": "auto",
+                "bed_leveling": True,
+                "flow_cali": False,
+                "vibration_cali": True,
+                "layer_inspect": False,
+                "timelapse": False,
+            }
+        }
+        self._publish(payload, wait_reply=True)
+        return remote_name

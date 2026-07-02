@@ -1,0 +1,8 @@
+{
+  "useMatlStation": true,
+  "gcodeToolCnt": 2,
+  "materialMappings": [
+    {"toolId": 0, "slotId": 1, "materialName": "PLA Red", "toolMaterialColor": "#FF0000", "slotMaterialColor": "#FF0000"},
+    {"toolId": 1, "slotId": 3, "materialName": "PLA Blue", "toolMaterialColor": "#0000FF", "slotMaterialColor": "#0000FF"}
+  ]
+}
