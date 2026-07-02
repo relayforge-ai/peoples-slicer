@@ -32,8 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", metavar="{" + ",".join(SUBCOMMANDS) + "}")
 
-    sub.add_parser("discover", help="find and connect printers on the LAN (enter a code once)")
-    sub.add_parser("review", help="audit a sliced file's finicky parameters for a printer/material")
+    disc_p = sub.add_parser("discover", help="find and connect printers on the LAN (enter a code once)")
+    disc_p.add_argument("--subnet", help="CIDR to scan (default: FORGE_DISCOVER_SUBNET or 192.168.4.0/24)")
+    disc_p.add_argument("--host", action="append", dest="hosts", help="probe specific host(s) instead of scanning")
+    disc_p.add_argument("--save", metavar="KEY", help="save a discovered printer into FORGE_CONFIG under KEY")
+
+    rev_p = sub.add_parser("review", help="audit a sliced file's finicky parameters for a printer/material")
+    rev_p.add_argument("file", help="path to .gcode or .gcode.3mf")
+    rev_p.add_argument("--printer", help="override classified printer key for the profile rules")
 
     send_p = sub.add_parser("send", help="send a sliced file to a printer, headless, zero parameter loss")
     send_p.add_argument("file", help="path to .gcode or .gcode.3mf")
@@ -45,7 +51,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("status", help="show what is queued and printing")
-    sub.add_parser("watch", help="watch a drop folder and route jobs automatically")
+    watch_p = sub.add_parser("watch", help="watch a drop folder and route jobs automatically")
+    watch_p.add_argument("--dir", dest="watch_dir", help="folder to watch (default: FORGE_WATCH_DIR or ~/forge-drop)")
+    watch_p.add_argument("--once", action="store_true", help="process existing files once and exit")
+    watch_p.add_argument(
+        "--bed-confirmed",
+        action="store_true",
+        help="confirm beds are clear before auto-sending (required for sends)",
+    )
+    watch_p.add_argument("--interval", type=float, default=None, help="poll interval seconds (default: 5)")
     return parser
 
 
@@ -101,6 +115,86 @@ def cmd_send(args, config_path: str | None) -> int:
     return 0 if result.get("state") in ("printing", "queued") else 1
 
 
+def cmd_discover(args, config_path: str | None) -> int:
+    from .discover import (
+        default_subnet,
+        merge_into_config,
+        printer_config_entry,
+        probe_host,
+        scan_hosts,
+        scan_subnet,
+        to_json,
+    )
+
+    if args.hosts:
+        found = scan_hosts(args.hosts, prober=probe_host)
+    else:
+        found = scan_subnet(args.subnet or default_subnet(), prober=probe_host)
+
+    print(to_json(found))
+    if args.save:
+        if len(found) != 1:
+            print(
+                f"--save requires exactly one discovered printer; found {len(found)}.",
+                file=sys.stderr,
+            )
+            return 1
+        entry = printer_config_entry(found[0])
+        merge_into_config(args.save, entry, config_path)
+        print(f"saved printer '{args.save}' to config")
+    return 0
+
+
+def cmd_review(args, config_path: str | None) -> int:
+    from .review import review_file
+
+    report = review_file(args.file, printer=args.printer)
+    print(json.dumps(report, indent=2))
+    return 1 if report.get("blocking") else 0
+
+
+def cmd_watch(args, config_path: str | None) -> int:
+    from .config import build_adapters, load_config
+    from .dispatcher import Dispatcher
+    from .guardian import Guardian
+    from .jobqueue import JobQueue
+    from .store import JsonlStore
+    from .watch import default_watch_dir, watch_loop, watch_once
+
+    cfg = load_config(config_path)
+    adapters = build_adapters(cfg)
+    if not adapters:
+        print("No printers configured. Run `forge discover` or set FORGE_CONFIG.", file=sys.stderr)
+        return 1
+
+    watch_dir = args.watch_dir or default_watch_dir()
+    os.makedirs(watch_dir, exist_ok=True)
+
+    store = JsonlStore(_default_events_path())
+    queue = JobQueue(_default_queue_path())
+    guardian = Guardian()
+    dispatcher = Dispatcher(adapters=adapters, queue=queue, store=store, guardian=guardian)
+    bed = True if args.bed_confirmed else None
+
+    if args.once:
+        results = watch_once(watch_dir, dispatcher, bed_confirmed=bed)
+        print(json.dumps(results, indent=2))
+        dispatcher.drain()
+        return 0
+
+    print(f"watching {watch_dir} (Ctrl+C to stop)")
+    try:
+        watch_loop(
+            watch_dir,
+            dispatcher,
+            interval=args.interval or float(os.environ.get("FORGE_WATCH_INTERVAL", "5")),
+            bed_confirmed=bed,
+        )
+    except KeyboardInterrupt:
+        print("\nstopped")
+    return 0
+
+
 def cmd_status(args, config_path: str | None) -> int:
     from .config import build_adapters, load_config
     from .jobqueue import JobQueue
@@ -136,13 +230,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config_path = getattr(args, "config", None)
+    if args.command == "discover":
+        return cmd_discover(args, config_path)
+    if args.command == "review":
+        return cmd_review(args, config_path)
     if args.command == "send":
         return cmd_send(args, config_path)
     if args.command == "status":
         return cmd_status(args, config_path)
+    if args.command == "watch":
+        return cmd_watch(args, config_path)
 
-    print(f"`forge {args.command}` is not implemented yet — see docs/superpowers/plans/.")
-    return 0
+    print(f"unknown command: {args.command}", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":  # pragma: no cover
