@@ -1,0 +1,110 @@
+{
+  "detail": {
+    "autoShutdown": "close",
+    "autoShutdownTime": 30,
+    "camera": 1,
+    "cameraStreamUrl": "http://REDACTED:8080/?action=stream",
+    "chamberFanSpeed": 0,
+    "chamberTargetTemp": 0,
+    "chamberTemp": 0,
+    "clearFanStatus": "open",
+    "coolingFanLeftSpeed": 0,
+    "coolingFanSpeed": 0,
+    "coordinate": [
+      129.94700622558594,
+      123.85900115966797,
+      18.850000381469727
+    ],
+    "cumulativeFilament": 278.40301513671875,
+    "cumulativePrintTime": 3670,
+    "currentPrintSpeed": 162,
+    "doorStatus": "close",
+    "errorCode": "",
+    "estimatedLeftLen": 0,
+    "estimatedLeftWeight": 0.0,
+    "estimatedRightLen": 63246.63671875,
+    "estimatedRightWeight": 153.27000427246094,
+    "estimatedTime": 25279.659726023674,
+    "externalFanStatus": "close",
+    "extrudeCtrl": 1,
+    "fillAmount": 15,
+    "firmwareVersion": "3.1.5-1.1.1",
+    "flashRegisterCode": "",
+    "hasLeftFilament": false,
+    "hasMatlStation": true,
+    "hasRightFilament": true,
+    "indepMatlInfo": {
+      "materialColor": "",
+      "materialName": "?",
+      "stateAction": 4,
+      "stateStep": 0
+    },
+    "internalFanStatus": "close",
+    "ipAddr": "REDACTED",
+    "leftFilamentType": "",
+    "leftTargetTemp": 0,
+    "leftTemp": 0,
+    "lightStatus": "open",
+    "location": "Group A",
+    "macAddr": "24:A1:0D:B5:C4:8B",
+    "matlStationInfo": {
+      "currentLoadSlot": 1,
+      "currentSlot": 1,
+      "slotCnt": 4,
+      "slotInfos": [
+        {
+          "hasFilament": true,
+          "materialColor": "#FEF043",
+          "materialName": "PLA",
+          "slotId": 1
+        },
+        {
+          "hasFilament": true,
+          "materialColor": "#161616",
+          "materialName": "PLA",
+          "slotId": 2
+        },
+        {
+          "hasFilament": true,
+          "materialColor": "#FFFFFF",
+          "materialName": "PLA",
+          "slotId": 3
+        },
+        {
+          "hasFilament": true,
+          "materialColor": "#F330F9",
+          "materialName": "PLA",
+          "slotId": 4
+        }
+      ],
+      "stateAction": 4,
+      "stateStep": 0
+    },
+    "measure": "220X220X220",
+    "moveCtrl": 1,
+    "name": "AD5X",
+    "nozzleCnt": 1,
+    "nozzleModel": "0.4mm",
+    "nozzleStyle": 0,
+    "pid": 38,
+    "platTargetTemp": 55.0,
+    "platTemp": 54.79999923706055,
+    "polarRegisterCode": "",
+    "printDuration": 36806,
+    "printFileName": "CW3D Baby Bee Dragon Colors.3mf",
+    "printFileThumbUrl": "http://REDACTED:8898/getThum",
+    "printLayer": 95,
+    "printProgress": 0.611906111240387,
+    "printSpeedAdjust": 100,
+    "remainingDiskSpace": 4.756092071533203,
+    "rightFilamentType": "PLA",
+    "rightTargetTemp": 220.0,
+    "rightTemp": 218.6199951171875,
+    "status": "printing",
+    "targetPrintLayer": 289,
+    "tvoc": 0,
+    "zAxisCompensation": 0.07000000029802322,
+    "serialNumber": "REDACTED",
+    "checkCode": "REDACTED"
+  }
+}
