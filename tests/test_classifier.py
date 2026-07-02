@@ -78,8 +78,22 @@ def test_est_missing_is_none():
     assert classify(ENDER_HEADER).est_grams is None
 
 
-def test_bambu_header_routes_to_bambu():
+def test_bambu_a2l_header_routes_to_bambu_a2l():
+    h = "; printer_model = Bambu Lab A2L\n; filament_type = PLA\n"
+    assert classify(h).printer == "bambu_a2l"
+
+
+def test_bambu_generic_header_routes_to_bambu():
     assert classify(BAMBU_HEADER).printer == "bambu"
+
+
+def test_printer_settings_id_fallback_when_model_blank():
+    h = (
+        "; printer_model = \n"
+        "; printer_settings_id = Ender3 Klipper (Foundry)\n"
+        "; filament_type = PLA\n"
+    )
+    assert classify(h).printer == "ender"
 
 
 def test_ender_header_routes_to_ender():

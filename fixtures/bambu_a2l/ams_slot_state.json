@@ -1,0 +1,13 @@
+{
+  "ams": [
+    {
+      "id": "0",
+      "tray": [
+        {"id": "0", "tray_color": "000000FF", "tray_type": "PLA"},
+        {"id": "1", "tray_color": "FFFFFFFF", "tray_type": "PLA"},
+        {"id": "2", "tray_color": "F7D959FF", "tray_type": "PLA"},
+        {"id": "3", "tray_color": "D3B7A7FF", "tray_type": "PLA"}
+      ]
+    }
+  ]
+}

@@ -10,6 +10,12 @@ import os
 from .jobqueue import JobQueue
 from .reader import classify_file
 
+# Classifier may return specific Bambu keys before both printers are wired in config.
+_PRINTER_ALIASES: dict[str, str] = {
+    "bambu_a2l": "bambu",
+    "bambu_a1mini": "bambu_a1mini",
+}
+
 
 def _hash_file(path: str) -> str:
     h = hashlib.sha256()
@@ -33,6 +39,16 @@ class Dispatcher:
             self.store.record(event)
         return event
 
+    def _adapter_key(self, printer: str | None) -> str | None:
+        if not printer:
+            return None
+        if printer in self.adapters:
+            return printer
+        alias = _PRINTER_ALIASES.get(printer)
+        if alias and alias in self.adapters:
+            return alias
+        return None
+
     def _known(self, printer: str, job_id: str) -> bool:
         ids = {j["id"] for j in self.queue.pending(printer)}
         active = self.queue.active(printer)
@@ -44,13 +60,14 @@ class Dispatcher:
         info = classify_file(path)
         name = os.path.basename(path)
 
-        if not info.printer or info.printer not in self.adapters:
+        adapter_key = self._adapter_key(info.printer)
+        if not adapter_key:
             return self._emit(
                 {"state": "quarantined", "name": name,
                  "printer": info.printer, "reason": "unknown_printer"}
             )
 
-        printer = info.printer
+        printer = adapter_key
         job_id = _hash_file(path)
         job = {
             "id": job_id, "name": name, "printer": printer, "path": path,

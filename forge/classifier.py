@@ -16,12 +16,18 @@ class JobInfo:
     est_grams: float | None = None
 
 
-# printer_model substring (lowercased) -> internal printer key
+# Substring (lowercased) -> internal printer key. More-specific needles first.
 _PRINTER_MAP: list[tuple[str, str]] = [
     ("flashforge ad5x", "ad5x"),
+    ("bambu lab a2l", "bambu_a2l"),
+    ("bambu lab a1 mini", "bambu_a1mini"),
+    ("a1 mini", "bambu_a1mini"),
+    ("a2l", "bambu_a2l"),
     ("bambu", "bambu"),
+    ("ender3 klipper", "ender"),
     ("creality", "ender"),
     ("ender", "ender"),
+    ("klipper", "ender"),
 ]
 
 
@@ -71,13 +77,25 @@ def _est_grams(header: str) -> float | None:
     return float(m.group()) if m else None
 
 
+def _resolve_printer(model: str, settings_id: str) -> str | None:
+    """Match printer_model first; fall back to printer_settings_id when model is blank."""
+    for source in (model, settings_id):
+        low = source.lower()
+        if not low:
+            continue
+        for needle, key in _PRINTER_MAP:
+            if needle in low:
+                return key
+    return None
+
+
 def classify(header: str) -> JobInfo:
     model = _header_value(header, "printer_model") or ""
-    low = model.lower()
-    printer = next((key for needle, key in _PRINTER_MAP if needle in low), None)
+    settings_id = _header_value(header, "printer_settings_id") or ""
+    printer = _resolve_printer(model, settings_id)
     return JobInfo(
         printer=printer,
-        printer_model=model,
+        printer_model=model or settings_id,
         material=_material(header),
         colors=_colors(header),
         est_seconds=_est_seconds(header),

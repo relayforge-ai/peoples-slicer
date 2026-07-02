@@ -6,6 +6,7 @@ Bambu ships a broken cert chain; CERT_NONE is standard for LAN integrations.
 from __future__ import annotations
 
 import json
+import os
 import ssl
 import ftplib
 import threading
@@ -20,6 +21,7 @@ except ImportError:  # pragma: no cover - optional until bambu extra installed
 
 MqttPublisher = Callable[[dict, bool], Optional[dict]]
 FtpsUploader = Callable[[str, str], str]
+StateFetcher = Callable[[], dict]
 
 
 class ImplicitFTP_TLS(ftplib.FTP_TLS):
@@ -54,6 +56,7 @@ class BambuAdapter:
         upload_retries: int = 3,
         mqtt_publisher: MqttPublisher | None = None,
         ftps_uploader: FtpsUploader | None = None,
+        state_fetcher: StateFetcher | None = None,
     ):
         if not host or not access_code or not serial:
             raise ValueError("host, access_code, and serial are required")
@@ -65,6 +68,7 @@ class BambuAdapter:
         self.upload_retries = max(1, upload_retries)
         self._mqtt_publisher = mqtt_publisher
         self._ftps_uploader = ftps_uploader
+        self._state_fetcher = state_fetcher
         self._seq = 0
         self.topic_pub = f"device/{serial}/request"
         self.topic_sub = f"device/{serial}/report"
@@ -80,10 +84,103 @@ class BambuAdapter:
         ctx.verify_mode = ssl.CERT_NONE
         return ctx
 
+    @staticmethod
+    def _rgb(color: str) -> tuple[int, int, int]:
+        c = color.lstrip("#")[:6]
+        if len(c) < 6:
+            return (0, 0, 0)
+        return tuple(int(c[i : i + 2], 16) for i in (0, 2, 4))
+
+    @staticmethod
+    def _mqtt_color_to_hex(color: str) -> str:
+        # Bambu MQTT reports RRGGBBAA; gcode headers use #RRGGBB.
+        c = (color or "").strip()
+        if not c or c == "00000000":
+            return "#000000"
+        if c.startswith("#"):
+            return c
+        return "#" + c[:6]
+
+    @staticmethod
+    def tool_colors(gcode_path: str) -> list[str]:
+        path = Path(gcode_path)
+        if path.suffix == ".3mf" or path.name.endswith(".gcode.3mf"):
+            with zipfile.ZipFile(gcode_path) as zf:
+                gc_name = next(n for n in zf.namelist() if n.endswith("plate_1.gcode"))
+                text = zf.read(gc_name).decode("utf-8", errors="replace")
+        else:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
+            if line.startswith("; filament_colour"):
+                return [
+                    c.strip()
+                    for c in line.split("=", 1)[1].strip().split(";")
+                    if c.strip()
+                ]
+        return []
+
+    @staticmethod
+    def parse_ams_trays(ams_state: dict) -> list[dict]:
+        trays: list[dict] = []
+        for ams_unit in ams_state.get("ams", []):
+            ams_id = int(ams_unit.get("id", 0))
+            for tray in ams_unit.get("tray", []):
+                tray_id = tray.get("id")
+                if tray_id is None:
+                    continue
+                tray_type = (tray.get("tray_type") or "").strip()
+                color = BambuAdapter._mqtt_color_to_hex(tray.get("tray_color", ""))
+                # Empty AMS slots report only {"id": "N"} with no tray_type — not by color.
+                loaded = bool(tray_type)
+                trays.append(
+                    {
+                        "slot": ams_id * 4 + int(tray_id),
+                        "color": color,
+                        "loaded": loaded,
+                    }
+                )
+        return trays
+
+    @staticmethod
+    def build_ams_mapping(tool_cols: list[str], trays: list[dict]) -> list[int]:
+        loaded = [t for t in trays if t.get("loaded")] or trays
+        mapping: list[int] = []
+        for tc in tool_cols:
+            tr = BambuAdapter._rgb(tc)
+            best = min(
+                loaded,
+                key=lambda sl: sum(
+                    (a - b) ** 2 for a, b in zip(tr, BambuAdapter._rgb(sl["color"]))
+                ),
+            )
+            mapping.append(best["slot"])
+        return mapping
+
+    def _verify_remote_size(self, ftp: ftplib.FTP_TLS, remote_name: str, expected: int) -> None:
+        remote_path = f"/{remote_name}"
+        try:
+            remote_size = ftp.size(remote_path)
+        except ftplib.error_perm:
+            lines: list[str] = []
+            ftp.retrlines(f"LIST {remote_path}", lines.append)
+            remote_size = None
+            for line in lines:
+                parts = line.split()
+                if len(parts) >= 5 and parts[-1].endswith(remote_name):
+                    remote_size = int(parts[4])
+                    break
+            if remote_size is None:
+                raise RuntimeError(f"FTPS upload verify failed: cannot stat {remote_path}")
+        if remote_size != expected:
+            raise RuntimeError(
+                f"FTPS upload size mismatch for {remote_name}: local={expected} remote={remote_size}"
+            )
+
     def _upload(self, local_path: str, remote_name: str) -> str:
         if self._ftps_uploader is not None:
             return self._ftps_uploader(local_path, remote_name)
 
+        expected = os.path.getsize(local_path)
         last_err: Exception | None = None
         for _ in range(self.upload_retries):
             try:
@@ -94,6 +191,7 @@ class BambuAdapter:
                 ftp.prot_p()
                 with open(local_path, "rb") as fh:
                     ftp.storbinary(f"STOR /{remote_name}", fh)
+                self._verify_remote_size(ftp, remote_name, expected)
                 ftp.quit()
                 return f"/{remote_name}"
             except Exception as exc:  # noqa: BLE001 - retry landmine
@@ -149,6 +247,8 @@ class BambuAdapter:
         return result[0]
 
     def _fetch_print_state(self) -> dict:
+        if self._state_fetcher is not None:
+            return self._state_fetcher()
         result: list[dict] = [{}]
         got = threading.Event()
         if mqtt is None:
@@ -232,7 +332,18 @@ class BambuAdapter:
         if not start:
             return remote_name
 
-        mapping = ams_mapping if ams_mapping is not None else [0]
+        if ams_mapping is not None:
+            mapping = ams_mapping
+        else:
+            tool_cols = self.tool_colors(gcode_path)
+            if len(tool_cols) > 1:
+                state = self._fetch_print_state()
+                trays = self.parse_ams_trays(state.get("ams", {}))
+                if not trays:
+                    raise RuntimeError("No AMS trays reported — cannot map multicolor job")
+                mapping = self.build_ams_mapping(tool_cols, trays)
+            else:
+                mapping = [0]
         payload = {
             "print": {
                 "sequence_id": self._next_seq(),
