@@ -21,6 +21,7 @@ def test_vetoes_flex_on_wrong_printer():
         "material": "TPU",
         "printer": "bambu",
         "colors": 1,
+        "bed_confirmed_clear": True,
     })
     assert approved is False
     assert "AD5X" in reason
@@ -31,6 +32,14 @@ def test_pluggable_veto_hook():
         return False, "amos says no"
 
     g = Guardian(veto_hook=hook)
-    approved, reason = g.approve({"path": "/a.gcode", "colors": 1})
+    approved, reason = g.approve({"path": "/a.gcode", "colors": 1, "bed_confirmed_clear": True})
     assert approved is False
     assert reason == "amos says no"
+
+
+def test_vetoes_when_bed_unspecified():
+    # fail-CLOSED regression: a job that never confirms the bed must NOT proceed
+    g = Guardian()
+    approved, reason = g.approve({"path": "/a.gcode", "colors": 1})
+    assert approved is False
+    assert "bed" in reason

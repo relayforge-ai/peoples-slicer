@@ -91,7 +91,7 @@ def cmd_send(args, config_path: str | None) -> int:
 
     result = dispatcher.submit(
         args.file,
-        bed_confirmed_clear=args.bed_confirmed if args.bed_confirmed else None,
+        bed_confirmed_clear=args.bed_confirmed,
     )
     if result.get("state") == "vetoed" and "bed" in result.get("reason", ""):
         print(f"VETOED: {result['reason']}. Pass --bed-confirmed after checking the camera.", file=sys.stderr)

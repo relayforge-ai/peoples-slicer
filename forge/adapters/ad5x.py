@@ -44,7 +44,10 @@ class AD5XAdapter:
 
     @staticmethod
     def _map_status(detail_status: str | None) -> str:
-        return "idle" if (detail_status or "").lower() == "ready" else "printing"
+        # "ready" and "completed" (finished, awaiting bed-clear) both mean the printer
+        # can accept the next job — otherwise a completed printer stalls the queue forever.
+        s = (detail_status or "").lower()
+        return "idle" if s in ("ready", "completed") else "printing"
 
     @staticmethod
     def _remote_name(path: str) -> str:
@@ -100,23 +103,39 @@ class AD5XAdapter:
         sock.sendall(("~" + command + "\r\n").encode())
         return self._recv(sock, timeout)
 
+    def _is_multicolor(self, gcode_path: str) -> bool:
+        # A multicolor AD5X job is a .3mf (zip) whose gcode lists >1 filament_colour.
+        if not zipfile.is_zipfile(gcode_path):
+            return False
+        try:
+            return len(self.tool_colors(gcode_path)) > 1
+        except Exception:
+            return False
+
     def send(self, gcode_path: str, start: bool = True) -> str:
         remote = self._remote_name(gcode_path)
+        multicolor = self._is_multicolor(gcode_path)
         with open(gcode_path, "rb") as fh:
             data = fh.read()
 
+        # Both single- and multi-color first upload the file over the 8899 socket.
         sock = socket.create_connection((self.host, self.gcode_port), timeout=8)
         try:
             self._cmd(sock, "M601 S1")
             self._cmd(sock, f"M28 {len(data)} 0:/user/{remote}")
             sock.sendall(data)
             self._cmd(sock, "M29")
-            if start:
-                reply = self._cmd(sock, f"M23 0:/user/{remote}")
-                if b"ok" not in reply.lower():
-                    self._cmd(sock, f'M6030 ":/user/{remote}"')
+            # Single-color start: M23 SELECTS the file, M6030 actually STARTS it — both required.
+            if start and not multicolor:
+                self._cmd(sock, f"M23 0:/user/{remote}")
+                self._cmd(sock, f'M6030 ":/user/{remote}"')
         finally:
             sock.close()
+
+        # Multicolor keystone: after upload, start via /printGcode carrying the IFS
+        # useMatlStation + materialMappings map — else the AD5X silently prints mono.
+        if multicolor:
+            self.send_multicolor(gcode_path, file_on_printer=remote, fire=start)
         return remote
 
     @staticmethod
@@ -141,11 +160,14 @@ class AD5XAdapter:
 
     @staticmethod
     def build_mappings(tool_cols: list[str], slots: list[dict]) -> list[dict]:
+        # Only match against slots that actually have filament loaded; an empty
+        # slot whose stale color happens to be nearest must never win the match.
+        loaded = [s for s in slots if s.get("hasFilament", True)] or slots
         maps: list[dict] = []
         for tid, tc in enumerate(tool_cols):
             tr = AD5XAdapter._rgb(tc)
             best = min(
-                slots,
+                loaded,
                 key=lambda sl: sum(
                     (a - b) ** 2
                     for a, b in zip(tr, AD5XAdapter._rgb(sl.get("materialColor", "#000000")))

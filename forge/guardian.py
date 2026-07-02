@@ -26,7 +26,9 @@ class Guardian:
     def _deterministic_checks(job: dict) -> tuple[bool, str]:
         if not job.get("path"):
             return False, "missing file path"
-        if job.get("bed_confirmed_clear") is False:
+        # Fail-CLOSED: the bed must be EXPLICITLY confirmed clear (True). Missing / None /
+        # False all veto — a physical safety gate must never proceed on an unconfirmed default.
+        if job.get("bed_confirmed_clear") is not True:
             return False, "bed not confirmed clear"
         if job.get("colors", 1) > 4:
             return False, "more than 4 colors — AD5X IFS limit"
