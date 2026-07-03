@@ -27,6 +27,19 @@ def _patch_socket(monkeypatch, fake):
     monkeypatch.setattr(socket, "create_connection", lambda *a, **k: fake)
 
 
+class SizeEchoingSock(FakeSock):
+    """Like FakeSock, but M29 echoes a `size:` field (real AD5X firmware behavior)."""
+
+    def __init__(self, echoed_size):
+        super().__init__()
+        self.echoed_size = echoed_size
+
+    def recv(self, _n):
+        if any(cmd.startswith(b"~M29") for cmd in self.sent[-1:]):
+            return f"size:{self.echoed_size}\r\nok\r\n".encode()
+        return b"ok\r\n"
+
+
 def test_single_color_send_selects_AND_starts(tmp_path, monkeypatch):
     fake = FakeSock()
     _patch_socket(monkeypatch, fake)
@@ -38,6 +51,40 @@ def test_single_color_send_selects_AND_starts(tmp_path, monkeypatch):
     sent = b"".join(fake.sent)
     assert b"M23 0:/user/cube.gcode" in sent          # select
     assert b'M6030 ":/user/cube.gcode"' in sent       # START — the bug: fired only if M23 failed
+
+
+def test_verify_write_size_passes_on_match():
+    AD5XAdapter._verify_write_size(b"size:10\r\nok\r\n", 10)  # no raise
+
+
+def test_verify_write_size_silent_when_not_echoed():
+    AD5XAdapter._verify_write_size(b"ok\r\n", 10)  # firmware doesn't always echo — no raise
+
+
+def test_verify_write_size_raises_on_mismatch():
+    try:
+        AD5XAdapter._verify_write_size(b"size:4\r\nok\r\n", 10)
+        assert False, "expected a size mismatch to raise"
+    except RuntimeError as exc:
+        assert "size" in str(exc).lower()
+
+
+def test_send_aborts_before_start_on_truncated_write(tmp_path, monkeypatch):
+    # M29 echoes a size smaller than what was sent — a truncated 8899 write (the
+    # flaky-transfer landmine) — send() must raise and never reach M23/M6030.
+    fake = SizeEchoingSock(echoed_size=4)
+    _patch_socket(monkeypatch, fake)
+    gc = tmp_path / "cube.gcode"
+    gc.write_bytes(b"G28\nG1 X0\n")  # 10 bytes, echoed size claims 4
+
+    try:
+        AD5XAdapter("h", "s", "c").send(str(gc), start=True)
+        assert False, "expected a truncated-write RuntimeError"
+    except RuntimeError as exc:
+        assert "AD5X write verify failed" in str(exc)
+
+    sent = b"".join(fake.sent)
+    assert b"M23" not in sent  # never reached the start sequence
 
 
 def _make_multicolor_3mf(path):

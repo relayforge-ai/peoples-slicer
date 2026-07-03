@@ -104,6 +104,50 @@ def test_upload_rejects_size_mismatch(tmp_path, monkeypatch):
         assert "size mismatch" in msg
 
 
+def test_upload_closes_connection_before_retrying(tmp_path, monkeypatch):
+    # A failed attempt must not leave its FTPS connection open — Bambu's control
+    # channel allows only one session, so a leaked connection could block the retry.
+    made = []
+
+    class FlakyThenGoodFTP:
+        def __init__(self):
+            self.closed = False
+            made.append(self)
+
+        def connect(self, *_a, **_k):
+            pass
+
+        def login(self, *_a, **_k):
+            pass
+
+        def prot_p(self):
+            pass
+
+        def storbinary(self, _cmd, fh):
+            if len(made) == 1:
+                raise ConnectionResetError("connection reset mid-transfer")
+            self.stored = fh.read()
+
+        def size(self, _path):
+            return len(self.stored)
+
+        def quit(self):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr("forge.adapters.bambu.ImplicitFTP_TLS", lambda *a, **k: FlakyThenGoodFTP())
+    local = tmp_path / "job.gcode.3mf"
+    local.write_bytes(b"slice-data")
+
+    remote = BambuAdapter("h", "c", "s", upload_retries=2)._upload(str(local), local.name)
+
+    assert remote == f"/{local.name}"
+    assert len(made) == 2
+    assert made[0].closed is True  # the failed first attempt was cleaned up
+
+
 def _make_multicolor_3mf(path):
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(

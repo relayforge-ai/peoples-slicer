@@ -103,6 +103,19 @@ class AD5XAdapter:
         sock.sendall(("~" + command + "\r\n").encode())
         return self._recv(sock, timeout)
 
+    @staticmethod
+    def _verify_write_size(m29_reply: bytes, expected: int) -> None:
+        # M29's reply sometimes echoes "size:<n>" for the just-written file — when it
+        # does, trust it over silence: a mismatch here means the 8899 write was
+        # truncated (the flaky-transfer landmine this project exists to catch), and
+        # starting a print on a truncated file must never happen silently.
+        match = re.search(rb"size\s*:\s*(\d+)", m29_reply, re.IGNORECASE)
+        if match and int(match.group(1)) != expected:
+            raise RuntimeError(
+                f"AD5X write verify failed: sent {expected} bytes, "
+                f"printer echoed size={int(match.group(1))}"
+            )
+
     def _is_multicolor(self, gcode_path: str) -> bool:
         # A multicolor AD5X job is a .3mf (zip) whose gcode lists >1 filament_colour.
         if not zipfile.is_zipfile(gcode_path):
@@ -124,7 +137,8 @@ class AD5XAdapter:
             self._cmd(sock, "M601 S1")
             self._cmd(sock, f"M28 {len(data)} 0:/user/{remote}")
             sock.sendall(data)
-            self._cmd(sock, "M29")
+            m29_reply = self._cmd(sock, "M29")
+            self._verify_write_size(m29_reply, len(data))
             # Single-color start: M23 SELECTS the file, M6030 actually STARTS it — both required.
             if start and not multicolor:
                 self._cmd(sock, f"M23 0:/user/{remote}")

@@ -185,6 +185,7 @@ class BambuAdapter:
         expected = os.path.getsize(local_path)
         last_err: Exception | None = None
         for _ in range(self.upload_retries):
+            ftp: ftplib.FTP_TLS | None = None
             try:
                 ctx = self._tls_context()
                 ftp = ImplicitFTP_TLS(context=ctx)
@@ -198,6 +199,15 @@ class BambuAdapter:
                 return f"/{remote_name}"
             except Exception as exc:  # noqa: BLE001 - retry landmine
                 last_err = exc
+                # Bambu's FTPS control channel allows only one session at a time — an
+                # abandoned connection from a failed attempt can block the very retry
+                # this loop exists to make. quit() needs a working channel (which may be
+                # exactly what just broke), so close() unconditionally instead.
+                if ftp is not None:
+                    try:
+                        ftp.close()
+                    except Exception:  # noqa: BLE001 - best-effort cleanup
+                        pass
         raise RuntimeError(f"FTPS upload failed after {self.upload_retries} tries") from last_err
 
     def _publish(self, payload: dict, wait_reply: bool = False) -> Optional[dict]:

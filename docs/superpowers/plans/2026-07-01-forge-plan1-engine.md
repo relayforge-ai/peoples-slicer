@@ -84,7 +84,7 @@ One file per printer implementing the `Adapter` Protocol (`status()`/`send()`); 
 
 - **`forge/adapters/bambu.py`** — from `send_bambu.py`: implicit-FTPS upload + MQTT start + AMS color map. `BambuAdapter(host, access_code, serial)`. Landmine: verify upload size before start (flaky-WiFi cancel). Fixtures: `bambu_a2l/mqtt_start.json`, `ftps_upload_trace.txt`.
 - **`forge/adapters/ad5x.py`** — from `~/Desktop/3d_prints_tests/ad5x_tools/` (`ad5x.py` + `ad5x_mc.py`): 8899 single + 8898 status + **the multicolor IFS keystone** (`build_mappings()` nearest-RGB from gcode tool colors + live `/detail` slot state → `/printGcode` with `useMatlStation`+`materialMappings`). `AD5XAdapter(host, serial, check_code)`. Keystone = a regression fixture (`ad5x/print_gcode_request.json`, `ifs_slot_state.json`, `mono_without_ifs_case.txt`).
-- **`forge/adapters/klipper.py`** — **write fresh** (no private source): Moonraker upload → `print/start` → `FIRMWARE_RESTART` recovery on "Lost communication with MCU" 400. `KlipperAdapter(moonraker_url)`. Fixtures: `ender/moonraker_upload.json`, `print_start.json`, `mcu_drop_400.txt`. (Real host today: `telcharpi4.local`/`192.168.4.24`.)
+- **`forge/adapters/klipper.py`** — **write fresh** (no private source): Moonraker upload → `print/start` → `FIRMWARE_RESTART` recovery on "Lost communication with MCU" 400. `KlipperAdapter(moonraker_url)`. Fixtures: `ender/moonraker_upload.json`, `print_start.json`, `mcu_drop_400.txt`. (Real host today: REDACTED — see local `.forge_config.json`/env, not committed.)
 
 ---
 
