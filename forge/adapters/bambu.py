@@ -143,7 +143,9 @@ class BambuAdapter:
 
     @staticmethod
     def build_ams_mapping(tool_cols: list[str], trays: list[dict]) -> list[int]:
-        loaded = [t for t in trays if t.get("loaded")] or trays
+        loaded = [t for t in trays if t.get("loaded")]
+        if not loaded:
+            raise RuntimeError("No loaded AMS trays — cannot map multicolor job")
         mapping: list[int] = []
         for tc in tool_cols:
             tr = BambuAdapter._rgb(tc)
@@ -332,10 +334,10 @@ class BambuAdapter:
         if not start:
             return remote_name
 
+        tool_cols = self.tool_colors(gcode_path)
         if ams_mapping is not None:
             mapping = ams_mapping
         else:
-            tool_cols = self.tool_colors(gcode_path)
             if len(tool_cols) > 1:
                 state = self._fetch_print_state()
                 trays = self.parse_ams_trays(state.get("ams", {}))
@@ -344,15 +346,17 @@ class BambuAdapter:
                 mapping = self.build_ams_mapping(tool_cols, trays)
             else:
                 mapping = [0]
+        is_bundle = path.suffix == ".3mf" or path.name.endswith(".gcode.3mf")
+        use_ams = len(tool_cols) > 1
         payload = {
             "print": {
                 "sequence_id": self._next_seq(),
                 "command": "project_file",
-                "param": "Metadata/plate_1.gcode",
+                "param": "Metadata/plate_1.gcode" if is_bundle else remote_name.lstrip("/"),
                 "url": f"ftp://{remote}",
                 "subtask_name": subtask_name or path.stem,
-                "use_ams": True,
-                "ams_mapping": mapping,
+                "use_ams": use_ams,
+                "ams_mapping": mapping if use_ams else [0],
                 "bed_type": "auto",
                 "bed_leveling": True,
                 "flow_cali": False,

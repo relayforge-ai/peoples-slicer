@@ -35,6 +35,6 @@ class Guardian:
         material = (job.get("material") or "").lower()
         printer = job.get("printer")
         if "tpu" in material or "flex" in material:
-            if printer not in (None, "ad5x"):
+            if printer != "ad5x":
                 return False, "flexible material must route to AD5X"
         return True, "ok"

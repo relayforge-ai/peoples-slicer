@@ -43,3 +43,9 @@ def test_vetoes_when_bed_unspecified():
     approved, reason = g.approve({"path": "/a.gcode", "colors": 1})
     assert approved is False
     assert "bed" in reason
+
+def test_flex_vetoed_on_ender():
+    g = Guardian()
+    ok, reason = g.approve({"path": "/x.gcode", "bed_confirmed_clear": True, "material": "TPU", "printer": "ender"})
+    assert not ok
+    assert "AD5X" in reason

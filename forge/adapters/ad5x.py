@@ -162,7 +162,7 @@ class AD5XAdapter:
     def build_mappings(tool_cols: list[str], slots: list[dict]) -> list[dict]:
         # Only match against slots that actually have filament loaded; an empty
         # slot whose stale color happens to be nearest must never win the match.
-        loaded = [s for s in slots if s.get("hasFilament", True)] or slots
+        loaded = [s for s in slots if s.get("hasFilament", False)] or slots
         maps: list[dict] = []
         for tid, tc in enumerate(tool_cols):
             tr = AD5XAdapter._rgb(tc)

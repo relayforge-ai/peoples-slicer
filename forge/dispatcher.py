@@ -13,7 +13,7 @@ from .reader import classify_file
 # Classifier may return specific Bambu keys before both printers are wired in config.
 _PRINTER_ALIASES: dict[str, str] = {
     "bambu_a2l": "bambu",
-    "bambu_a1mini": "bambu_a1mini",
+    "bambu_a1mini": "bambu",
 }
 
 
@@ -95,23 +95,45 @@ class Dispatcher:
         if can_send_now:
             self.queue.enqueue(printer, job)
             self.queue.start_next(printer)
-            adapter.send(path, start=True)
-            return self._emit({**job, "job_id": job_id, "state": "printing"})
+            return self._send_job(printer, adapter, job)
 
         self.queue.enqueue(printer, job)
         return self._emit({**job, "job_id": job_id, "state": "queued"})
+
+    def _send_job(self, printer: str, adapter, job: dict) -> dict:
+        try:
+            adapter.send(job["path"], start=True)
+        except Exception as exc:  # noqa: BLE001
+            self.queue.requeue_front(printer, job)
+            return self._emit(
+                {**job, "job_id": job["id"], "state": "failed", "reason": str(exc)}
+            )
+        return self._emit({**job, "job_id": job["id"], "state": "printing"})
 
     def drain(self) -> list[dict]:
         """Start the next queued job on any printer that just went idle."""
         results = []
         for printer, adapter in self.adapters.items():
-            if self.queue.active(printer) is not None:
-                continue
+            active = self.queue.active(printer)
+            if active is not None:
+                if adapter.status() == "idle":
+                    self.queue.complete(printer, active["id"])
+                else:
+                    continue
             if not self.queue.pending(printer):
                 continue
             if adapter.status() != "idle":
                 continue
             job = self.queue.start_next(printer)
-            adapter.send(job["path"], start=True)
-            results.append(self._emit({**job, "job_id": job["id"], "state": "printing"}))
+            if job is None:
+                continue
+            if self.guardian is not None:
+                approved, reason = self.guardian.approve(job)
+                if not approved:
+                    self.queue.requeue_front(printer, job)
+                    results.append(
+                        self._emit({**job, "job_id": job["id"], "state": "vetoed", "reason": reason})
+                    )
+                    continue
+            results.append(self._send_job(printer, adapter, job))
         return results

@@ -59,3 +59,8 @@ class JobQueue:
         if active and active["id"] == job_id:
             self._state["active"][printer] = None
             self._save()
+
+    def requeue_front(self, printer: str, job: dict) -> None:
+        self._state["active"][printer] = None
+        self._state["pending"].setdefault(printer, []).insert(0, job)
+        self._save()

@@ -104,7 +104,38 @@ def test_drain_does_not_start_second_job_while_active(tmp_path):
     ad5x = FakeAdapter("idle")
     d, q = _dispatcher(tmp_path, ad5x)
     d.submit(_write_gcode(tmp_path, name="a.gcode"))   # -> printing (active)
-    d.submit(_write_gcode(tmp_path, name="b.gcode"))   # active exists -> queued
+    ad5x._status = "printing"
+    d.submit(_write_gcode(tmp_path, name="b.gcode", model="Flashforge AD5X B"))   # active exists -> queued
     sent_before = len(ad5x.sent)
     assert d.drain() == []                              # don't start b over a
     assert len(ad5x.sent) == sent_before
+
+
+def test_drain_completes_idle_active_before_next(tmp_path):
+    ad5x = FakeAdapter("idle")
+    d, q = _dispatcher(tmp_path, ad5x)
+    res1 = d.submit(_write_gcode(tmp_path, name="a.gcode"))
+    assert res1["state"] == "printing"
+    ad5x._status = "printing"
+    d.submit(_write_gcode(tmp_path, name="b.gcode", model="Flashforge AD5X B"))
+    ad5x._status = "idle"
+    drained = d.drain()
+    assert len(drained) == 1
+    assert drained[0]["state"] == "printing"
+    assert q.active("ad5x")["name"] == "b.gcode"
+
+
+def test_drain_vetoes_without_bed_confirmed(tmp_path):
+    from forge.guardian import Guardian
+
+    ad5x = FakeAdapter("idle")
+    q = JobQueue(str(tmp_path / "state.json"))
+    d = Dispatcher(adapters={"ad5x": ad5x}, queue=q, guardian=Guardian())
+    gpath = _write_gcode(tmp_path)
+    q.enqueue("ad5x", {
+        "id": "manual", "name": "job.gcode", "printer": "ad5x", "path": gpath,
+        "material": "PLA", "colors": 1,
+    })
+    drained = d.drain()
+    assert drained[0]["state"] == "vetoed"
+    assert ad5x.sent == []
