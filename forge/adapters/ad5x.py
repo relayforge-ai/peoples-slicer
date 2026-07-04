@@ -136,8 +136,13 @@ class AD5XAdapter:
         try:
             self._cmd(sock, "M601 S1")
             self._cmd(sock, f"M28 {len(data)} 0:/user/{remote}")
+            # The 8s command timeout is lethal for large files: streaming the
+            # bytes and the M29 flush-ack both scale with file size (found live
+            # on a 41MB Highland Cow, 2026-07-03). Budget ~200KB/s worst case.
+            xfer_timeout = max(60.0, len(data) / 200_000)
+            sock.settimeout(xfer_timeout)
             sock.sendall(data)
-            m29_reply = self._cmd(sock, "M29")
+            m29_reply = self._cmd(sock, "M29", timeout=xfer_timeout)
             self._verify_write_size(m29_reply, len(data))
             # Single-color start: M23 SELECTS the file, M6030 actually STARTS it — both required.
             if start and not multicolor:
