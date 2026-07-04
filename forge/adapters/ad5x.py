@@ -141,7 +141,13 @@ class AD5XAdapter:
             # on a 41MB Highland Cow, 2026-07-03). Budget ~200KB/s worst case.
             xfer_timeout = max(60.0, len(data) / 200_000)
             sock.settimeout(xfer_timeout)
-            sock.sendall(data)
+            # Stream in 256KiB chunks with a breather — one giant sendall
+            # overruns the printer's embedded TCP stack and silently truncates
+            # the file (uploads "succeed", touchscreen says "incomplete file").
+            # The pre-rewrite tools always chunked; large files need it.
+            for i in range(0, len(data), 262_144):
+                sock.sendall(data[i : i + 262_144])
+                time.sleep(0.02)
             m29_reply = self._cmd(sock, "M29", timeout=xfer_timeout)
             self._verify_write_size(m29_reply, len(data))
             # Single-color start: M23 SELECTS the file, M6030 actually STARTS it — both required.
