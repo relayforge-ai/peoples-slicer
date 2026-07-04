@@ -365,6 +365,13 @@ class BambuAdapter:
                 "param": "Metadata/plate_1.gcode" if is_bundle else remote_name.lstrip("/"),
                 "url": f"ftp://{remote}",
                 "subtask_name": subtask_name or path.stem,
+                # A1-mini-class firmware replies "success" but never starts a
+                # project_file without these ids; A2L accepts either way.
+                # Verified live on telchar_2's maiden print, 2026-07-03.
+                "project_id": "0",
+                "profile_id": "0",
+                "task_id": "0",
+                "subtask_id": "0",
                 "use_ams": use_ams,
                 "ams_mapping": mapping if use_ams else [0],
                 "bed_type": "auto",
