@@ -121,6 +121,15 @@ class BambuAdapter:
 
     @staticmethod
     def parse_ams_trays(ams_state: dict) -> list[dict]:
+        """Flatten Bambu's nested AMS report into one dict per tray.
+
+        Each AMS unit holds four trays, so a tray's global slot index — the value
+        an ``ams_mapping`` entry references — is ``unit_id * 4 + tray_id``.
+
+        Returns one ``{"slot": int, "color": "#RRGGBB", "loaded": bool}`` per tray
+        in report order, where ``loaded`` marks slots that actually hold filament
+        (so an empty slot is never a color-match candidate in ``build_ams_mapping``).
+        """
         trays: list[dict] = []
         for ams_unit in ams_state.get("ams", []):
             ams_id = int(ams_unit.get("id", 0))
