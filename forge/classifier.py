@@ -8,6 +8,27 @@ from dataclasses import dataclass
 
 @dataclass
 class JobInfo:
+    """The routing decision distilled from a slice's g-code header.
+
+    This is the data contract the rest of the Forge consumes — the dispatcher
+    routes on it, and the CLI/review surfaces echo it back to the user.
+
+    Fields:
+        printer: Internal printer key (e.g. ``"ad5x"``, ``"bambu_a2l"``) the job
+            should route to, or ``None`` when the header matched no known printer.
+        printer_model: The raw human-readable model string from the header
+            (``printer_model``, falling back to ``printer_settings_id``); ``""``
+            when neither is present. Kept for display/diagnostics, not routing.
+        material: Primary filament type, upper- or mixed-case as sliced
+            (e.g. ``"PLA"``, ``"TPU"``); ``""`` when the header omits it.
+        colors: Number of distinct filaments/colors in the slice (``1`` for a
+            single-material job).
+        est_seconds: Estimated print time in whole seconds, or ``None`` when the
+            header carries no parseable time estimate.
+        est_grams: Estimated filament mass in grams, or ``None`` when the header
+            carries no parseable mass estimate.
+    """
+
     printer: str | None
     printer_model: str = ""
     material: str = ""
