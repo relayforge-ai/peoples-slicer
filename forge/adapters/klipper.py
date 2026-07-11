@@ -14,6 +14,23 @@ StatusFetcher = Callable[[], dict]
 
 
 class KlipperAdapter:
+    """Drive a Klipper printer through its Moonraker HTTP API.
+
+    Implements the :class:`~forge.adapters.base.Adapter` contract (``status`` +
+    ``send``) for any Moonraker host, with two deliberate robustness behaviors
+    that keep an unreliable LAN from surprising the caller:
+
+    - ``status()`` never raises: any network failure (unreachable host, timeout,
+      malformed JSON, HTTP error) is reported as ``"offline"``, so the dispatcher
+      treats an unreachable printer as simply not-idle rather than crashing.
+    - upload and print-start each retry **once** through a ``firmware_restart()``
+      when Moonraker reports "Lost communication with MCU" — the common
+      recoverable stall on these boards — instead of failing the job outright.
+
+    ``http_poster`` / ``status_fetcher`` are injection seams for tests; when
+    left unset the adapter talks to ``moonraker_url`` over real HTTP.
+    """
+
     key = "ender"
 
     def __init__(
