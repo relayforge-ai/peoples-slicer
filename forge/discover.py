@@ -151,11 +151,20 @@ def merge_into_config(
     spec: dict,
     config_path: str | None = None,
 ) -> dict:
-    """Merge a discovered printer spec into the forge config JSON."""
+    """Merge a discovered printer spec into the forge config JSON.
+
+    A pre-existing but corrupt config raises a clear :class:`ValueError` naming
+    the file (mirroring :func:`forge.config.load_config`) rather than leaking a
+    bare ``JSONDecodeError``, and the file is left untouched so the user can fix
+    it instead of losing their existing printers to a silent overwrite.
+    """
     path = Path(config_path or os.path.expanduser(os.environ.get("FORGE_CONFIG", "~/.forge_config.json")))
     cfg: dict = {"printers": {}}
     if path.exists():
-        loaded = json.loads(path.read_text())
+        try:
+            loaded = json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"malformed forge config JSON: {path}") from exc
         if isinstance(loaded, dict):
             cfg.update(loaded)
     printers = cfg.setdefault("printers", {})
