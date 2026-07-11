@@ -43,13 +43,32 @@ def load_config(path: str | None = None) -> dict[str, Any]:
 
 
 def build_adapters(cfg: dict[str, Any]) -> dict:
+    """Instantiate a printer adapter for each entry in ``cfg["printers"]``.
+
+    The spec's ``type`` selects the adapter; unrecognized types are skipped.
+    A spec missing a required host/credential field raises a :class:`ValueError`
+    naming the offending printer and field, instead of leaking a bare
+    ``KeyError`` from deep inside adapter construction.
+    """
     from .adapters.ad5x import AD5XAdapter
     from .adapters.bambu import BambuAdapter
     from .adapters.klipper import KlipperAdapter
 
+    required_fields = {
+        "ad5x": ("host", "serial", "checkcode"),
+        "bambu": ("host", "access_code", "serial"),
+        "klipper": ("moonraker_url",),
+        "ender": ("moonraker_url",),
+    }
+
     adapters = {}
     for key, spec in cfg.get("printers", {}).items():
         kind = spec.get("type", key)
+        for name in required_fields.get(kind, ()):
+            if name not in spec:
+                raise ValueError(
+                    f"printer {key!r} ({kind}) is missing required field {name!r}"
+                )
         if kind == "ad5x":
             adapters[key] = AD5XAdapter(
                 host=spec["host"],
