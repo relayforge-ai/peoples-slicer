@@ -19,6 +19,31 @@ ApiPoster = Callable[[str, dict], dict]
 
 
 class AD5XAdapter:
+    """Drive a FlashForge AD5X, honoring the :class:`~forge.adapters.base.Adapter`
+    contract (``status`` + ``send``).
+
+    Speaks two protocols at once: an 8898 HTTP/JSON channel for status, detail,
+    and control (every request authed with ``serialNumber`` + ``checkCode``), and
+    a raw 8899 socket that streams the g-code up with ``M28``/``M29`` and starts a
+    single-color job with ``M23`` (select) + ``M6030`` (start). Three robustness
+    behaviors keep the headless flow from surprising its user:
+
+    - ``status()`` collapses the printer's detail-status into ``"idle"`` /
+      ``"printing"`` / ``"offline"``, treating both ``"ready"`` and ``"completed"``
+      as idle so a finished printer awaiting bed-clear can't stall the queue, and
+      reporting ``"offline"`` on any network failure instead of raising.
+    - ``send()`` streams the upload in 256KiB chunks with a file-size-scaled
+      timeout and verifies the written byte count against ``M29``'s echoed
+      ``size:`` — a truncated transfer (this project's core landmine) raises
+      rather than silently starting a print on a bad file.
+    - a multicolor ``.3mf`` must additionally start via the 8898 ``/printGcode``
+      keystone carrying the IFS ``materialMappings`` (``send_multicolor``);
+      without it the AD5X ignores the color assignments and prints mono.
+
+    ``detail_fetcher`` / ``api_poster`` are injection seams for tests and offline
+    use; when left unset the adapter talks to ``host`` over real HTTP.
+    """
+
     key = "ad5x"
 
     def __init__(
