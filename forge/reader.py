@@ -57,13 +57,22 @@ def _head_tail_plain(path: str) -> bytes:
 
 
 def _full_gcode_bytes(path: str) -> bytes:
+    """Return the raw g-code bytes, unzipping `.3mf` / `.gcode.3mf` jobs first.
+
+    A truncated or non-zip `.3mf` (a common casualty of an interrupted LAN copy)
+    raises a clear ``ValueError`` naming the file instead of leaking a bare
+    ``zipfile.BadZipFile`` stack trace at the import boundary.
+    """
     name = Path(path).name
     if Path(path).suffix == ".3mf" or name.endswith(".gcode.3mf"):
-        with zipfile.ZipFile(path) as zf:
-            gc_name = next((n for n in zf.namelist() if n.endswith("plate_1.gcode")), None)
-            if gc_name is None:
-                raise ValueError(f"no Metadata/plate_1.gcode in {name} — not sliced?")
-            return zf.read(gc_name)
+        try:
+            with zipfile.ZipFile(path) as zf:
+                gc_name = next((n for n in zf.namelist() if n.endswith("plate_1.gcode")), None)
+                if gc_name is None:
+                    raise ValueError(f"no Metadata/plate_1.gcode in {name} — not sliced?")
+                return zf.read(gc_name)
+        except zipfile.BadZipFile as exc:
+            raise ValueError(f"{name} is not a valid .3mf archive (corrupt or incomplete)") from exc
     with open(path, "rb") as f:
         return f.read()
 
