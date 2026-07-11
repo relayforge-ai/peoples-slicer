@@ -183,6 +183,27 @@ def review_params(params: dict[str, str], printer: str | None, material: str = "
 
 
 def review_file(path: str, printer: str | None = None) -> dict:
+    """Classify one sliced file and lint its parameters against its printer profile.
+
+    ``printer`` overrides the printer the file classifies to; when ``None`` the
+    classified printer is used (and an unknown printer falls through to the empty
+    profile, yielding only the generic, profile-independent findings).
+
+    Returns the JSON-serializable report that ``forge review`` prints, with keys:
+
+    - ``file`` — the path reviewed.
+    - ``printer`` — the profile actually linted against (the override, else the
+      classified printer, else ``None``).
+    - ``classified_printer`` — what the g-code header alone routes to, kept
+      distinct from ``printer`` so an override stays visible.
+    - ``material`` / ``colors`` — echoed straight from classification.
+    - ``findings`` — a list of ``Finding`` dicts (``param``, ``value``,
+      ``severity`` one of ``ok`` / ``warn`` / ``suggest``, ``message``).
+    - ``blocking`` — ``True`` only when a flexible material is routed to the
+      wrong printer (a ``material_route`` warning). This is the sole condition
+      that makes ``forge review`` exit non-zero; every other finding, including
+      an out-of-range nozzle temp, is advisory and leaves ``blocking`` ``False``.
+    """
     info = classify_file(path)
     target = printer or info.printer
     meta = read_gcode_meta(path)
