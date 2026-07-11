@@ -57,6 +57,19 @@ class Dispatcher:
         return job_id in ids
 
     def submit(self, path: str, **extra) -> dict:
+        """Classify and route one sliced file, returning a single result event.
+
+        Any ``**extra`` fields (e.g. ``bed_confirmed_clear``) are merged into the
+        job and forwarded to the guardian. The returned dict always carries a
+        ``state`` key describing the outcome:
+
+        - ``"quarantined"`` — no adapter matches the classified printer.
+        - ``"duplicate"`` — this file's job id is already pending or active.
+        - ``"vetoed"`` — the guardian refused the job (``reason`` explains why).
+        - ``"printing"`` — sent to an idle printer and started.
+        - ``"failed"`` — the send raised; the job is requeued at the front.
+        - ``"queued"`` — accepted but held behind other work for this printer.
+        """
         info = classify_file(path)
         name = os.path.basename(path)
 
