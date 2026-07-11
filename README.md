@@ -22,6 +22,37 @@ interfaces to every printer we can reach.**
    between the slicer and the machine.
 3. **Mom-simple** — anyone could make anything within the printer's limits using just a laptop + an agent.
 
+## Quickstart
+
+Slice in OrcaSlicer as usual — `forge` handles everything *after* the slice. Five commands:
+
+```bash
+# 1. Install (Python 3.10+)
+pipx install git+https://github.com/relayforge-ai/peoples-slicer     # or, from a clone: pip install .
+
+# 2. Point it at a printer — every credential is read from the ENV; nothing is stored in the repo
+export AD5X_HOST=192.168.4.37 AD5X_SERIAL=… AD5X_CHECKCODE=…         # FlashForge AD5X
+#  or  export BAMBU_HOST=… BAMBU_ACCESS_CODE=… BAMBU_SERIAL=…        # Bambu A2L
+#  or  export MOONRAKER_URL=http://192.168.4.49:7125                 # Ender 3 / Klipper
+
+# 3. Find printers on the LAN (enter the pairing code once, then --save it)
+forge discover --save ad5x
+
+# 4. Check a sliced file BEFORE it ever hits the machine
+forge review part.gcode.3mf          # audits the finicky, easily-dropped params for that printer
+forge send  part.gcode.3mf --dry-run # classify + review only, don't send
+
+# 5. Send — headless, zero parameter loss (AD5X multicolor IFS map auto-built)
+forge send part.gcode.3mf
+forge status                         # what's queued / printing
+
+# Hands-off: drop files in a folder and forge routes them for you
+forge watch --dir ~/forge-drop
+```
+
+`forge --help` lists every subcommand. **No keys are ever written to disk in the repo** — the
+adapter reads `AD5X_*` / `BAMBU_*` / `MOONRAKER_URL` (or a `FORGE_CONFIG` file you control) at runtime.
+
 ## Why It Exists — the landmines are real
 
 Found the hard way, live, in one night (2026-06-29 → 30):
@@ -75,8 +106,8 @@ self-mapping.** Pillars #1 and #2, proven.
 ## Status & Roadmap
 
 - ✅ **Phase 1 (the unlock):** headless send + zero-param multicolor for all three printers. *Proven live.*
-- ✅ **Phase 2 (the fork):** MIT repo with `forge` engine — classifier, queue, dispatcher, AD5X/Bambu/Klipper adapters, Amos guardian, `forge send`/`status` CLI. *55 tests green.*
-- ⏳ **Phase 3 (the product):** discover + review + viewer + one-command install; the mom test.
+- ✅ **Phase 2 (the fork):** MIT repo with `forge` engine — classifier, queue, dispatcher, AD5X/Bambu/Klipper adapters, Amos guardian, and the full `forge discover / review / send / status / watch` CLI. *98 tests green.*
+- ⏳ **Phase 3 (the product):** a simple project viewer + one-command install + a 30-second demo; the mom test.
 
 ## Credits
 
