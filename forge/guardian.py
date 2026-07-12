@@ -15,6 +15,19 @@ class Guardian:
         self.veto_hook = veto_hook
 
     def approve(self, job: dict) -> tuple[bool, str]:
+        """Decide whether a job may be sent, returning ``(approved, reason)``.
+
+        The single safety gate the dispatcher calls before every send. It runs
+        the deterministic reflexes first (:meth:`_deterministic_checks`) and
+        short-circuits on the first failing one — these are fail-closed and run
+        even when every LLM is offline, so the returned ``reason`` names the
+        specific reflex that vetoed (e.g. ``"bed not confirmed clear"``). Only
+        when all reflexes pass is the optional ``veto_hook`` consulted; it must
+        honor the same ``(approved, reason)`` contract and its verdict is
+        returned verbatim. With no hook set, an all-clear job returns
+        ``(True, "ok")``. This method never raises on a malformed ``job`` dict —
+        missing keys are treated as unconfirmed and veto.
+        """
         approved, reason = self._deterministic_checks(job)
         if not approved:
             return approved, reason
