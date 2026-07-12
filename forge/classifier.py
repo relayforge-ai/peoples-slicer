@@ -113,6 +113,20 @@ def _resolve_printer(model: str, settings_id: str) -> str | None:
 
 
 def classify(header: str) -> JobInfo:
+    """Distill a slice's g-code header text into a routing :class:`JobInfo`.
+
+    The public entry point of this pure-functions module: it takes the already-
+    extracted header text (see :func:`forge.reader.classify_file`), does no I/O,
+    and never raises on a missing or garbled field — each unresolved field falls
+    back to its documented default (``printer`` ``None``, string fields ``""``,
+    ``colors`` ``1``, estimates ``None``).
+
+    Printer resolution tries ``printer_model`` first, then ``printer_settings_id``
+    as a fallback, matching each against :data:`_PRINTER_MAP` most-specific needle
+    first; ``printer`` is ``None`` when neither string matches a known printer.
+    ``printer_model`` is echoed back as the raw model string (or the settings id
+    when the model line is absent) for display, not routing.
+    """
     model = _header_value(header, "printer_model") or ""
     settings_id = _header_value(header, "printer_settings_id") or ""
     printer = _resolve_printer(model, settings_id)
