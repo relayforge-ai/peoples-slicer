@@ -1,7 +1,10 @@
 """Persistent per-printer FIFO job queue, crash-recoverable.
 
 State is a single JSON file written atomically on every mutation, so a restart
-(`JobQueue(same_path)`) restores pending + active jobs exactly.
+(`JobQueue(same_path)`) restores pending + active jobs exactly. A pre-existing
+but corrupt state file raises a clear `ValueError` naming the file (mirroring
+`forge.config.load_config`) rather than leaking a bare `JSONDecodeError` or
+silently discarding the user's queued jobs.
 """
 import json
 import os
@@ -14,7 +17,17 @@ class JobQueue:
         self._state = {"pending": {}, "active": {}}
         if os.path.exists(state_path):
             with open(state_path) as f:
-                self._state = json.load(f)
+                try:
+                    loaded = json.load(f)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"malformed forge queue state JSON: {state_path}"
+                    ) from exc
+            if not isinstance(loaded, dict):
+                raise ValueError(
+                    f"forge queue state must be a JSON object: {state_path}"
+                )
+            self._state = loaded
         self._state.setdefault("pending", {})
         self._state.setdefault("active", {})
 
