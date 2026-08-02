@@ -86,6 +86,20 @@ def read_gcode_meta(path: str) -> str:
 
 
 def classify_file(path: str) -> JobInfo:
+    """Classify a sliced g-code file into a routing :class:`JobInfo`.
+
+    The public classification entry point for the CLI and dispatcher. It first
+    classifies from the cheap head+tail window (via :func:`_meta_from_raw`),
+    unzipping a ``.3mf`` into memory once. If that window can't resolve a printer
+    (``info.printer is None``) — the BambuStudio case where CONFIG_BLOCK sits
+    megabytes past the tail — it falls back to scanning the *full* file for just
+    the classifier-relevant header lines and re-classifies with those appended
+    (reusing the already-unzipped ``.3mf`` bytes rather than re-reading).
+
+    The fallback never downgrades a successful match: it runs only when the first
+    pass left the printer unresolved. Raises :class:`ValueError` (via
+    :func:`_full_gcode_bytes`) on a corrupt/incomplete ``.3mf`` archive.
+    """
     name = Path(path).name
     is_3mf = Path(path).suffix == ".3mf" or name.endswith(".gcode.3mf")
     raw = _full_gcode_bytes(path) if is_3mf else _head_tail_plain(path)

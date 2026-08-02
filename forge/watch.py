@@ -40,13 +40,33 @@ def watch_once(
     seen: set[str] | None = None,
     bed_confirmed: bool | None = None,
 ) -> list[dict]:
+    """Route every not-yet-seen file in ``watch_dir`` through the dispatcher once.
+
+    Returns one result dict per newly-seen file. A file that raises while being
+    classified or routed (e.g. a corrupt / half-copied ``.3mf`` from an
+    interrupted LAN transfer, or a file that vanished mid-copy) is turned into an
+    ``{"state": "errored", ...}`` result instead of propagating — a single bad
+    drop must never kill the headless :func:`watch_loop` and stall every good
+    file queued behind it. The offending path is already marked seen by
+    :func:`collect_new_files`, so it is reported once and not retried each tick.
+    """
     seen_set = seen if seen is not None else set()
     results: list[dict] = []
     for path in collect_new_files(watch_dir, seen_set):
         extra = {}
         if bed_confirmed is not None:
             extra["bed_confirmed_clear"] = bed_confirmed
-        results.append(dispatcher.submit(path, **extra))
+        try:
+            results.append(dispatcher.submit(path, **extra))
+        except Exception as exc:  # noqa: BLE001 - one bad drop must not kill the daemon
+            results.append(
+                {
+                    "state": "errored",
+                    "name": os.path.basename(path),
+                    "path": path,
+                    "reason": str(exc),
+                }
+            )
     return results
 
 
