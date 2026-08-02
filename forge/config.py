@@ -8,6 +8,23 @@ from typing import Any
 
 
 def load_config(path: str | None = None) -> dict[str, Any]:
+    """Load the forge config, layering environment overrides over a JSON file.
+
+    The config source is ``path`` if given, else the ``FORGE_CONFIG`` env var.
+    A missing (or unset) file is not an error — the base ``{"printers": {}}`` is
+    used — but a file that exists and is *not* a valid JSON object raises a clear
+    :class:`ValueError` naming the file rather than leaking a bare
+    ``JSONDecodeError`` (mirroring :func:`forge.discover.merge_into_config`).
+
+    After the file is loaded, the ``AD5X_HOST`` / ``BAMBU_HOST`` /
+    ``MOONRAKER_URL`` env vars (with their optional credential companions) add or
+    replace the printer entries keyed ``"ad5x"`` / ``"bambu"`` / ``"ender"``
+    respectively, so an env var wins over a same-key file entry. This lets a
+    single exported host bring a printer online without a config file at all.
+
+    Returns the config dict — always with a ``"printers"`` mapping — ready to
+    hand to :func:`build_adapters`.
+    """
     cfg: dict[str, Any] = {"printers": {}}
     config_path = path or os.environ.get("FORGE_CONFIG")
     if config_path and Path(config_path).exists():
