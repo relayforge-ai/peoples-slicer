@@ -127,6 +127,20 @@ def _default_events_path() -> str:
     return os.path.expanduser(os.environ.get("FORGE_EVENTS_PATH", "~/.forge_jobs.jsonl"))
 
 
+def _input_file_error(path: str) -> str | None:
+    """Return a one-line error if ``path`` is not a readable file, else ``None``.
+
+    Guards the ``send`` / ``review`` commands, whose file argument is handed
+    straight to the classifier (``os.path.getsize`` / ``zipfile.ZipFile``). A
+    mistyped or missing path — the mistake a non-technical, headless operator
+    makes most — otherwise leaks a bare ``FileNotFoundError`` traceback instead
+    of the clear, actionable line the north star asks for.
+    """
+    if not os.path.isfile(path):
+        return f"file not found: {path}"
+    return None
+
+
 def cmd_send(args, config_path: str | None) -> int:
     from .config import build_adapters, load_config
     from .dispatcher import Dispatcher
@@ -134,6 +148,11 @@ def cmd_send(args, config_path: str | None) -> int:
     from .jobqueue import JobQueue
     from .reader import classify_file
     from .store import JsonlStore, NullStore
+
+    err = _input_file_error(args.file)
+    if err:
+        print(err, file=sys.stderr)
+        return 1
 
     info = classify_file(args.file)
     print(json.dumps({
@@ -203,6 +222,11 @@ def cmd_discover(args, config_path: str | None) -> int:
 
 def cmd_review(args, config_path: str | None) -> int:
     from .review import review_file
+
+    err = _input_file_error(args.file)
+    if err:
+        print(err, file=sys.stderr)
+        return 1
 
     report = review_file(args.file, printer=args.printer)
     print(json.dumps(report, indent=2))
