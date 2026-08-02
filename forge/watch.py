@@ -78,6 +78,24 @@ def watch_loop(
     bed_confirmed: bool | None = None,
     sleep_fn=time.sleep,
 ) -> None:
+    """Poll ``watch_dir`` forever, routing each dropped file exactly once.
+
+    The headless ``forge watch`` daemon. It never returns on its own — the CLI
+    stops it via ``KeyboardInterrupt`` — so it is built to survive whatever a bad
+    drop or an offline printer throws at it. Each tick does two things:
+
+    - :func:`watch_once`, which routes every newly-seen file (and turns a corrupt
+      or half-copied drop into an ``"errored"`` result rather than raising, so one
+      bad file can't kill the loop);
+    - ``dispatcher.drain()``, which starts the next queued job on any printer that
+      has gone idle since the last tick — this is what lets a job that was
+      ``"queued"`` behind a busy printer eventually print without a new drop.
+
+    A single ``seen`` set lives across every tick, so a file is routed once for
+    the lifetime of the daemon even though it stays on disk. ``interval`` is the
+    seconds slept between ticks; ``sleep_fn`` is the injection seam that lets a
+    test drive the loop without real time passing.
+    """
     seen: set[str] = set()
     while True:
         watch_once(watch_dir, dispatcher, seen=seen, bed_confirmed=bed_confirmed)
