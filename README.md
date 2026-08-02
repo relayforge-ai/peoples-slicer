@@ -48,6 +48,13 @@ forge status                         # what's queued / printing
 
 # Hands-off: drop files in a folder and forge routes them for you
 forge watch --dir ~/forge-drop
+
+# REL-600/601 — headless multi-printer slice (optional; needs BambuStudio/Orca AppImages)
+forge slice model.stl --printer a1mini --plan-only --goal max_parts
+forge slice model.stl --printer a2l -o out.gcode.3mf --auto-refit
+forge slice-send model.stl --printer a2l --dry-run          # slice + classify, no send
+forge slice-send model.stl --printer a2l --bed-confirmed    # live send (guardian)
+forge harvest                                               # index Orca vendor profiles
 ```
 
 `forge --help` lists every subcommand. **No keys are ever written to disk in the repo** — the

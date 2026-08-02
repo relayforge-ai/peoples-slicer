@@ -1,0 +1,8 @@
+[Unit]
+Description=REL-600 Orca/Bambu profile harvest
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/peoples-slicer/forge/slice/scripts/update_orca_profiles.sh
+Nice=15
