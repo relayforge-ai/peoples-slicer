@@ -175,6 +175,21 @@ def merge_into_config(
 
 
 def printer_config_entry(found: DiscoveredPrinter, credentials: dict | None = None) -> dict:
+    """Shape a discovered printer + entered credentials into a config entry.
+
+    Returns the ``{"type": ...}`` dict that :func:`merge_into_config` persists
+    under a printer key, one shape per :attr:`DiscoveredPrinter.kind`:
+
+    - ``klipper`` → ``moonraker_url`` (the entered value wins; otherwise the
+      URL fingerprinted into ``found.detail`` during the probe).
+    - ``ad5x`` → ``host`` plus ``serial``/``checkcode``.
+    - ``bambu`` → ``host`` plus ``access_code``/``serial``.
+
+    ``credentials`` overrides always take precedence; missing secrets default to
+    ``""`` so the entry is shape-complete (ready to save now and fill in later)
+    rather than carrying ``None``. An unknown ``kind`` raises :class:`ValueError`
+    instead of silently emitting a half-formed entry.
+    """
     creds = credentials or {}
     if found.kind == "klipper":
         return {
