@@ -1,0 +1,10 @@
+[Unit]
+Description=REL-600 profile harvest 3×/week (Mon/Wed/Fri 06:15)
+
+[Timer]
+OnCalendar=Mon,Wed,Fri *-*-* 06:15:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

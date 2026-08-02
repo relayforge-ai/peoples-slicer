@@ -8,7 +8,7 @@ import sys
 
 from . import BRAND, __version__
 
-SUBCOMMANDS = ("discover", "review", "send", "status", "watch")
+SUBCOMMANDS = ("discover", "review", "send", "status", "watch", "slice", "slice-send", "harvest")
 
 
 def banner() -> str:
@@ -60,6 +60,48 @@ def build_parser() -> argparse.ArgumentParser:
         help="confirm beds are clear before auto-sending (required for sends)",
     )
     watch_p.add_argument("--interval", type=float, default=None, help="poll interval seconds (default: 5)")
+
+    # REL-600 / REL-601 — headless multi-printer slice (+ optional send)
+    slice_p = sub.add_parser(
+        "slice",
+        help="REL-600/601: headless-slice a model for a studio printer (fit + flattened profiles)",
+    )
+    slice_p.add_argument("model", help="path to .stl / .3mf")
+    slice_p.add_argument(
+        "--printer",
+        required=True,
+        choices=("a1mini", "a2l", "ad5x", "ender"),
+        help="target printer key (forge_printers / routing table)",
+    )
+    slice_p.add_argument("-o", "--output", help="output .gcode / .gcode.3mf path")
+    slice_p.add_argument("--dry-run", action="store_true", help="resolve profiles + fit only")
+    slice_p.add_argument("--auto-refit", action="store_true", help="scale part to fit bed (REL-600)")
+    slice_p.add_argument(
+        "--goal",
+        choices=("single", "photo_line", "max_parts", "estimate"),
+        help="plate policy goal (sets scale/repetitions/arrange)",
+    )
+    slice_p.add_argument("--plan-only", action="store_true", help="print plate policy JSON and exit")
+    slice_p.add_argument("--timeout", type=int, default=900)
+
+    ss_p = sub.add_parser(
+        "slice-send",
+        help="REL-601: slice then send (guardian + --bed-confirmed required for live send)",
+    )
+    ss_p.add_argument("model", help="path to .stl / .3mf")
+    ss_p.add_argument("--printer", required=True, choices=("a1mini", "a2l", "ad5x", "ender"))
+    ss_p.add_argument("-o", "--output", help="sliced output path")
+    ss_p.add_argument("--auto-refit", action="store_true")
+    ss_p.add_argument("--goal", choices=("single", "photo_line", "max_parts", "estimate"))
+    ss_p.add_argument("--timeout", type=int, default=900)
+    ss_p.add_argument("--dry-run", action="store_true", help="slice + classify only, do not send")
+    ss_p.add_argument(
+        "--bed-confirmed",
+        action="store_true",
+        help="confirm bed clear (required for live send; fail-closed otherwise)",
+    )
+
+    sub.add_parser("harvest", help="REL-600: harvest Orca/Bambu vendor profiles into ~/.forge/harvest")
     return parser
 
 
@@ -195,6 +237,137 @@ def cmd_watch(args, config_path: str | None) -> int:
     return 0
 
 
+def cmd_slice(args, config_path: str | None) -> int:
+    """REL-600/601: headless multi-printer slice."""
+    from .slice import FitError, SliceError, plan_plate, refit_scale, slice_for
+    from .slice.printers import get_printer
+
+    if args.plan_only:
+        policy = plan_plate(args.model, args.printer, goal=args.goal or "single")
+        refit = refit_scale(args.model, args.printer)
+        print(json.dumps({
+            "refit": {
+                "scale": refit.scale,
+                "fits_without_scale": refit.fits_without_scale,
+                "note": refit.note,
+            },
+            "policy": policy.as_dict(),
+            "printer": get_printer(args.printer).display_name,
+        }, indent=2))
+        return 0
+
+    try:
+        result = slice_for(
+            args.model,
+            args.printer,
+            output=args.output,
+            timeout=args.timeout,
+            dry_run=args.dry_run,
+            auto_refit=args.auto_refit or (args.goal is not None),
+            goal=args.goal,
+        )
+    except FitError as e:
+        print(f"FIT: {e}", file=sys.stderr)
+        return 3
+    except (SliceError, FileNotFoundError, KeyError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    print(json.dumps({
+        "ok": result.ok,
+        "printer": result.printer,
+        "backend": result.backend,
+        "output": result.output,
+        "bounds": result.bounds,
+        "estimates": result.estimates,
+        "scale": result.scale,
+        "repetitions": result.repetitions,
+        "policy": result.policy,
+        "detail": result.detail,
+    }, indent=2))
+    return 0
+
+
+def cmd_slice_send(args, config_path: str | None) -> int:
+    """REL-601: slice → review classify → guardian-gated send."""
+    from .slice import FitError, SliceError, slice_for
+
+    # 1) Slice
+    try:
+        result = slice_for(
+            args.model,
+            args.printer,
+            output=args.output,
+            timeout=args.timeout,
+            dry_run=False,
+            auto_refit=args.auto_refit or (args.goal is not None),
+            goal=args.goal,
+        )
+    except FitError as e:
+        print(f"FIT: {e}", file=sys.stderr)
+        return 3
+    except (SliceError, FileNotFoundError, KeyError) as e:
+        print(f"SLICE ERROR: {e}", file=sys.stderr)
+        return 1
+
+    print(json.dumps({
+        "sliced": True,
+        "output": result.output,
+        "estimates": result.estimates,
+        "scale": result.scale,
+    }, indent=2))
+
+    # 2) Send path reuses cmd_send logic
+    class _SendArgs:
+        file = result.output
+        dry_run = True if args.dry_run else False
+        bed_confirmed = bool(args.bed_confirmed)
+
+    if args.dry_run:
+        print("(slice-send dry-run — not sending; pass without --dry-run and with --bed-confirmed to send)")
+        # still classify
+        from .reader import classify_file
+        info = classify_file(result.output)
+        print(json.dumps({
+            "printer": info.printer,
+            "material": info.material,
+            "colors": info.colors,
+            "est_seconds": info.est_seconds,
+            "est_grams": info.est_grams,
+        }, indent=2))
+        return 0
+
+    return cmd_send(_SendArgs(), config_path)
+
+
+def cmd_harvest(args, config_path: str | None) -> int:
+    """REL-600: harvest installed Orca/Bambu profile trees."""
+    from .slice.profile_harvester import (
+        DEFAULT_MANIFEST,
+        diff_manifests,
+        harvest_all,
+        load_manifest,
+        write_manifest,
+    )
+
+    new = harvest_all()
+    old = load_manifest(DEFAULT_MANIFEST)
+    path = write_manifest(new, DEFAULT_MANIFEST)
+    diff = diff_manifests(old or {"records": []}, new)
+    print(json.dumps({
+        "count": new["count"],
+        "vendors": len(new.get("vendors") or []),
+        "types": new.get("types"),
+        "manifest": str(path),
+        "diff": {
+            "added": diff.get("added_count"),
+            "changed": diff.get("changed_count"),
+            "removed": diff.get("removed_count"),
+        },
+    }, indent=2))
+    return 0
+
+
 def cmd_status(args, config_path: str | None) -> int:
     from .config import build_adapters, load_config
     from .jobqueue import JobQueue
@@ -240,6 +413,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_status(args, config_path)
     if args.command == "watch":
         return cmd_watch(args, config_path)
+    if args.command == "slice":
+        return cmd_slice(args, config_path)
+    if args.command == "slice-send":
+        return cmd_slice_send(args, config_path)
+    if args.command == "harvest":
+        return cmd_harvest(args, config_path)
 
     print(f"unknown command: {args.command}", file=sys.stderr)
     return 1

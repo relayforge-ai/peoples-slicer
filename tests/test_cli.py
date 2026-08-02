@@ -15,10 +15,10 @@ def test_banner_carries_the_brand_and_funnel():
     assert "telchar.relayforge.tools" in b            # the funnel, always
 
 
-def test_help_lists_the_five_subcommands(capsys):
+def test_help_lists_core_and_slice_subcommands(capsys):
     rc = cli.main(["--help"])
     out = capsys.readouterr().out
-    for sub in ("discover", "review", "send", "status", "watch"):
+    for sub in ("discover", "review", "send", "status", "watch", "slice", "slice-send", "harvest"):
         assert sub in out
     assert rc == 0
 
