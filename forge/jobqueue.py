@@ -11,6 +11,33 @@ import os
 
 
 class JobQueue:
+    """Per-printer FIFO of jobs plus at most one active job, persisted on disk.
+
+    State is ``{"pending": {printer: [job, ...]}, "active": {printer: job|None}}``,
+    where each ``job`` is a dict carrying at least an ``"id"``. Jobs for a printer
+    wait in that printer's ``pending`` FIFO until :meth:`start_next` promotes the
+    front one to ``active`` — one printer runs one job at a time. The module
+    docstring covers the on-disk format and crash recovery; this documents the
+    in-memory contract callers (the :class:`~forge.dispatcher.Dispatcher`) rely on:
+
+    - :meth:`enqueue` appends to the FIFO but is a **no-op for a duplicate id** —
+      one already pending or active for that printer — so re-submitting the same
+      file can't double-queue it.
+    - :meth:`peek` / :meth:`active` return the front pending job / the running
+      job (or ``None``) without mutating anything.
+    - :meth:`pending` returns a **copy** of the FIFO; mutating the result leaves
+      the queue untouched.
+    - :meth:`start_next` pops the front pending job and records it as ``active``,
+      returning it (or ``None`` when nothing is pending).
+    - :meth:`complete` clears ``active`` only when the id **matches**, so a stale
+      completion for an already-replaced job is safely ignored.
+    - :meth:`requeue_front` clears ``active`` and pushes the job back to the
+      **front** of pending — used on a failed send so it is retried first.
+
+    Every mutation persists immediately (atomic tmp-write + replace), so the file
+    always matches memory and a restart restores pending + active exactly.
+    """
+
     def __init__(self, state_path: str):
         self.state_path = state_path
         os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
