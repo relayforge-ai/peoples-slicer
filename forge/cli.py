@@ -137,18 +137,31 @@ def cmd_send(args, config_path: str | None) -> int:
 def cmd_discover(args, config_path: str | None) -> int:
     from .discover import (
         default_subnet,
+        iter_subnet_hosts,
         merge_into_config,
         printer_config_entry,
         probe_host,
         scan_hosts,
-        scan_subnet,
         to_json,
     )
 
     if args.hosts:
         found = scan_hosts(args.hosts, prober=probe_host)
     else:
-        found = scan_subnet(args.subnet or default_subnet(), prober=probe_host)
+        subnet = args.subnet or default_subnet()
+        # Validate the CIDR at the boundary: a mistyped --subnet (or a bad
+        # FORGE_DISCOVER_SUBNET) otherwise leaks a bare ipaddress ValueError
+        # traceback instead of one actionable line, the same landmine that
+        # `_input_file_error` files down for send/review.
+        try:
+            hosts = iter_subnet_hosts(subnet)
+        except ValueError:
+            print(
+                f"invalid --subnet {subnet!r}: expected a CIDR like 192.168.4.0/24",
+                file=sys.stderr,
+            )
+            return 1
+        found = scan_hosts(hosts, prober=probe_host)
 
     print(to_json(found))
     if args.save:
