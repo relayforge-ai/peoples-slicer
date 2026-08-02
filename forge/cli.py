@@ -8,7 +8,10 @@ import sys
 
 from . import BRAND, __version__
 
-SUBCOMMANDS = ("discover", "review", "send", "status", "watch", "slice", "slice-send", "harvest")
+SUBCOMMANDS = (
+    "discover", "review", "send", "status", "watch",
+    "slice", "slice-send", "slice-batch", "harvest",
+)
 
 
 def banner() -> str:
@@ -102,6 +105,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("harvest", help="REL-600: harvest Orca/Bambu vendor profiles into ~/.forge/harvest")
+
+    batch_p = sub.add_parser(
+        "slice-batch",
+        help="REL-599: A1 mini multi-plate batch (≤4) for PlateCycler photo line",
+    )
+    batch_p.add_argument("models", nargs="+", help="model paths (.stl/.3mf), max 4 per batch")
+    batch_p.add_argument("-o", "--out-dir", help="output directory for plate_*.gcode.3mf")
+    batch_p.add_argument("--auto-refit", action="store_true", default=True)
+    batch_p.add_argument("--no-auto-refit", action="store_true")
+    batch_p.add_argument("--dry-run", action="store_true")
+    batch_p.add_argument("--timeout", type=int, default=900)
     return parser
 
 
@@ -340,6 +354,23 @@ def cmd_slice_send(args, config_path: str | None) -> int:
     return cmd_send(_SendArgs(), config_path)
 
 
+def cmd_slice_batch(args, config_path: str | None) -> int:
+    """REL-599: multi-plate a1mini batch for PlateCycler."""
+    from .slice import slice_batch
+
+    auto = not bool(getattr(args, "no_auto_refit", False))
+    result = slice_batch(
+        list(args.models),
+        out_dir=args.out_dir,
+        auto_refit=auto,
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+    )
+    print(json.dumps(result.as_dict(), indent=2))
+    ok = all(p.get("status") in {"ok", "planned"} for p in result.plates) if result.plates else False
+    return 0 if ok or args.dry_run else 1
+
+
 def cmd_harvest(args, config_path: str | None) -> int:
     """REL-600: harvest installed Orca/Bambu profile trees."""
     from .slice.profile_harvester import (
@@ -419,6 +450,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_slice_send(args, config_path)
     if args.command == "harvest":
         return cmd_harvest(args, config_path)
+    if args.command == "slice-batch":
+        return cmd_slice_batch(args, config_path)
 
     print(f"unknown command: {args.command}", file=sys.stderr)
     return 1
