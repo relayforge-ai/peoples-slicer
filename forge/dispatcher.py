@@ -26,6 +26,26 @@ def _hash_file(path: str) -> str:
 
 
 class Dispatcher:
+    """Routes classified g-code to printer adapters — send now or queue.
+
+    Wires the four collaborators the headless flow needs:
+
+    - ``adapters``: ``{printer_key: Adapter}`` — the only objects that touch a
+      printer. The dispatcher calls just ``status()`` and ``send()`` on them
+      (see ``adapters.base.Adapter``); a classifier key like ``"bambu_a2l"``
+      is collapsed onto a configured adapter via ``_PRINTER_ALIASES``.
+    - ``queue``: the crash-recoverable per-printer FIFO (``JobQueue``) that
+      backs the send-now-vs-hold decision and survives restarts.
+    - ``store``: optional event sink; when set, every emitted event is also
+      written through ``store.record`` (the MakerLobster visibility seam).
+    - ``guardian``: optional print-safety gate consulted after de-duplication
+      and before any send; a veto becomes a ``"vetoed"`` event, never a send.
+
+    Every routing decision — from both :meth:`submit` and :meth:`drain` — is
+    funneled through :meth:`_emit`, so ``events`` holds an in-order log of every
+    outcome this process produced and each returned dict carries a ``state`` key.
+    """
+
     def __init__(self, adapters: dict, queue: JobQueue, store=None, guardian=None):
         self.adapters = adapters
         self.queue = queue
