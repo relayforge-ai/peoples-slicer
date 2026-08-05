@@ -99,20 +99,38 @@ def build_backend_cmd(
 
     if printer.backend == "orca":
         idx = orca_index()
-        # Ender Foundry profiles live outside the AppImage tree and already inherit
-        # stock Creality names; flatten when possible, else pass through Foundry leaf.
-        try:
-            machine = write_flattened(idx, printer.machine_name, tmp / "machine.json")
-        except FileNotFoundError:
-            machine = DEFAULT_FOUNDRY_ORCA / "Ender3_Klipper.json"
-        try:
-            process = write_flattened(idx, printer.process_name, tmp / "process.json")
-        except FileNotFoundError:
-            process = DEFAULT_FOUNDRY_ORCA / "Foundry_Process_0.20.json"
-        try:
-            filament = write_flattened(idx, printer.filament_name, tmp / "filament.json")
-        except FileNotFoundError:
-            filament = DEFAULT_FOUNDRY_ORCA / "Silk_PLA.json"
+
+        def _resolve_or_foundry_fallback(name: str, fallback: Path, dest: Path) -> Path:
+            # Ender Foundry profiles live outside the AppImage tree and already inherit
+            # stock Creality names; flatten when possible, else pass through the Foundry
+            # leaf file — but only if that fallback actually exists. REL-631: silently
+            # handing back a nonexistent fallback path recreates the same fail-open the
+            # missing-vendor-profile case has: `cmd.flattened_machine` gets set to a Path
+            # that was never validated, and downstream code only checks it when the path
+            # happens to exist (`if cmd.flattened_machine and cmd.flattened_machine.exists()`)
+            # — a nonexistent fallback would skip that check entirely instead of failing.
+            try:
+                return write_flattened(idx, name, dest)
+            except FileNotFoundError as exc:
+                if fallback.exists():
+                    return fallback
+                raise FileNotFoundError(
+                    f"profile not found: {name!r}, and the Foundry fallback {fallback} "
+                    f"does not exist either. Set ORCA_PROFILES to an extracted Orca/"
+                    f"Orca-Flashforge AppImage's resources/profiles directory, or "
+                    f"FOUNDRY_ORCA_PROFILES to a directory containing the Foundry override "
+                    f"files (e.g. Ender3_Klipper.json)."
+                ) from exc
+
+        machine = _resolve_or_foundry_fallback(
+            printer.machine_name, DEFAULT_FOUNDRY_ORCA / "Ender3_Klipper.json", tmp / "machine.json"
+        )
+        process = _resolve_or_foundry_fallback(
+            printer.process_name, DEFAULT_FOUNDRY_ORCA / "Foundry_Process_0.20.json", tmp / "process.json"
+        )
+        filament = _resolve_or_foundry_fallback(
+            printer.filament_name, DEFAULT_FOUNDRY_ORCA / "Silk_PLA.json", tmp / "filament.json"
+        )
 
         root = _orca_root()
         binary = root / "bin" / "orca-slicer"
