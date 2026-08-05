@@ -191,6 +191,9 @@ def cmd_send(args, config_path: str | None) -> int:
 
 
 def cmd_discover(args, config_path: str | None) -> int:
+    import time
+    from dataclasses import asdict
+
     from .discover import (
         default_subnet,
         iter_subnet_hosts,
@@ -201,8 +204,27 @@ def cmd_discover(args, config_path: str | None) -> int:
         to_json,
     )
 
+    # Stream, don't buffer: a sequential /24 scan could be silently slow (up to ~19 min
+    # worst case at the default per-probe timeout) with nothing printed until the very
+    # end — indistinguishable from a hang. Print each hit the instant it's found, and a
+    # throttled progress line to stderr so a scan that's finding nothing still shows
+    # it's alive.
+    last_progress = 0.0
+
+    def _on_result(found_printer):
+        print(json.dumps(asdict(found_printer)))
+
+    def _on_progress(done: int, total: int) -> None:
+        nonlocal last_progress
+        now = time.monotonic()
+        if done == total or now - last_progress >= 1.0:
+            print(f"scanned {done}/{total}...", file=sys.stderr)
+            last_progress = now
+
     if args.hosts:
-        found = scan_hosts(args.hosts, prober=probe_host)
+        found = scan_hosts(
+            args.hosts, prober=probe_host, on_result=_on_result, on_progress=_on_progress
+        )
     else:
         subnet = args.subnet or default_subnet()
         # Validate the CIDR at the boundary: a mistyped --subnet (or a bad
@@ -217,8 +239,11 @@ def cmd_discover(args, config_path: str | None) -> int:
                 file=sys.stderr,
             )
             return 1
-        found = scan_hosts(hosts, prober=probe_host)
+        found = scan_hosts(
+            hosts, prober=probe_host, on_result=_on_result, on_progress=_on_progress
+        )
 
+    print(f"--- {len(found)} found ---", file=sys.stderr)
     print(to_json(found))
     if args.save:
         if len(found) != 1:
