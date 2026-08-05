@@ -11,6 +11,7 @@ import os
 import socket
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -124,11 +125,48 @@ def probe_host(host: str) -> list[DiscoveredPrinter]:
     return found
 
 
-def scan_hosts(hosts: list[str], prober: HostProber | None = None) -> list[DiscoveredPrinter]:
+DEFAULT_MAX_WORKERS = int(os.environ.get("FORGE_DISCOVER_WORKERS", "128"))
+
+
+def scan_hosts(
+    hosts: list[str],
+    prober: HostProber | None = None,
+    *,
+    max_workers: int | None = None,
+    on_result: Callable[[DiscoveredPrinter], None] | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[DiscoveredPrinter]:
+    """Probe every host and return everything found (unchanged return contract).
+
+    Runs probes concurrently (stdlib ``ThreadPoolExecutor`` — no new dependency) instead
+    of one host at a time. A sequential scan of a full /24 with unresponsive hosts is a
+    real, silent multi-minute wait (up to ~19 min at the default per-probe timeout); this
+    cuts that to seconds by overlapping the socket-level waits across many hosts at once.
+
+    ``on_result`` fires immediately for each printer found (not buffered to the end) so a
+    caller can stream hits as they land. ``on_progress(done, total)`` fires after each
+    host finishes all its probes, so a caller can show *some* signal even on a scan that
+    finds nothing — the silence, not just the buffering, is what makes a slow scan look
+    hung.
+    """
     probe = prober or probe_host
+    workers = max_workers or DEFAULT_MAX_WORKERS
     results: list[DiscoveredPrinter] = []
-    for host in hosts:
-        results.extend(probe(host))
+    total = len(hosts)
+    done = 0
+    if total == 0:
+        return results
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, total))) as pool:
+        futures = {pool.submit(probe, host): host for host in hosts}
+        for future in as_completed(futures):
+            done += 1
+            hits = future.result()
+            for hit in hits:
+                results.append(hit)
+                if on_result is not None:
+                    on_result(hit)
+            if on_progress is not None:
+                on_progress(done, total)
     return results
 
 
@@ -142,8 +180,21 @@ def default_subnet() -> str:
     return os.environ.get("FORGE_DISCOVER_SUBNET", "192.168.4.0/24")
 
 
-def scan_subnet(cidr: str | None = None, prober: HostProber | None = None) -> list[DiscoveredPrinter]:
-    return scan_hosts(iter_subnet_hosts(cidr or default_subnet()), prober=prober)
+def scan_subnet(
+    cidr: str | None = None,
+    prober: HostProber | None = None,
+    *,
+    max_workers: int | None = None,
+    on_result: Callable[[DiscoveredPrinter], None] | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[DiscoveredPrinter]:
+    return scan_hosts(
+        iter_subnet_hosts(cidr or default_subnet()),
+        prober=prober,
+        max_workers=max_workers,
+        on_result=on_result,
+        on_progress=on_progress,
+    )
 
 
 def merge_into_config(
