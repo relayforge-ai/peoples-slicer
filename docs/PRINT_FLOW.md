@@ -15,7 +15,9 @@ verify the gcode, send headless, watch the first layer.** Zero parameter loss be
 - **Save to:** `TELCHAR/01_models/<creator>/<sku>__<ModelName>.zip` (Drive).
   - On DAWES, the agent mirrors with: `rclone copy "gdrive:TELCHAR/03_ready_to_print/" ~/print_work/ready/`
 
-## Step 2 — SLICE (GUI — OrcaSlicer 2.4.0, the stable path)
+## Step 2 — SLICE
+
+**GUI (OrcaSlicer 2.4.0, a human at a desktop):**
 
 1. Open OrcaSlicer. **Select the correct printer profile** at top-left:
    `Bambu Lab A2L` · `Flashforge AD5X 0.4 nozzle` · `Ender-3 (Klipper)`. **Wrong profile = stripped/garbage output.**
@@ -28,6 +30,16 @@ verify the gcode, send headless, watch the first layer.** Zero parameter loss be
    - **Ender →** `.gcode`  ·  **Bambu / AD5X →** `.gcode.3mf`
 7. **Save to:** `TELCHAR/03_ready_to_print/` using the naming convention (see FILE_DISCIPLINE).
 
+**Headless (`forge slice`, REL-600/601 — an agent with no GUI to click through):**
+
+```bash
+forge slice <sku>.stl --printer a2l --dry-run   # resolve profiles + fit-check first
+forge slice <sku>.stl --printer a2l -o TELCHAR/03_ready_to_print/<sku>__<Name>_bambu_pla_<time>.gcode.3mf
+```
+Needs the BambuStudio/Orca-Flashforge AppImages set up per the main README's Prerequisites
+section — that's real one-time setup, not a substitute for Step 3's inspection gate below,
+which applies identically to a headless slice's output.
+
 ## Step 3 — INSPECT (verify the gcode BEFORE sending — the zero-param gate)
 
 The agent never sends a file it hasn't checked. Extract `Metadata/plate_1.gcode` from the `.gcode.3mf`
@@ -37,26 +49,40 @@ The agent never sends a file it hasn't checked. Extract `Metadata/plate_1.gcode`
   each color · `; printer_model = ` matches the target printer.
 - **Single-color:** one tool, correct profile, sane filament-used totals.
 - **AD5X only:** the IFS slots currently loaded (`/detail` → `matlStationInfo.slotInfos`) **match the gcode's
-  `filament_colour` order/colors.** `ad5x_mc.py` does this match automatically and prints the mapping.
+  `filament_colour` order/colors.** `forge`'s AD5X adapter does this match automatically and prints the mapping.
 
-## Step 4 — SEND (headless, per printer)
+Do this with `forge review <file>` — it audits exactly these things before anything is sent.
+
+## Step 4 — SEND (headless, one command regardless of printer)
 
 First mirror the file to the local working dir: `rclone copy "gdrive:TELCHAR/03_ready_to_print/<file>" ~/print_work/ready/`
 
-| Printer | Command |
+Point `forge` at the target printer once (env vars — see the main README), then:
+
+```bash
+forge send ~/print_work/ready/<file> --dry-run          # classify + review, no send
+forge send ~/print_work/ready/<file> --bed-confirmed     # live send, fail-closed guardian
+forge status                                             # confirm it's actually printing
+```
+
+The adapter is selected automatically from the file's classified printer/material — you never
+invoke a per-printer script directly. Landmines the adapters already handle for you:
+
+| Printer | What the adapter does about it |
 |---|---|
-| **Bambu A2L** | `python3 ~/print_work/send_bambu.py ~/print_work/ready/<file>.gcode.3mf <ams_mapping e.g. 3,0,1> <name>` |
-| **Ender 3** | upload to Moonraker (`POST :7125/server/files/upload`) → start (`POST :7125/printer/print/start?filename=<n>`). If it 400s with *"Lost communication with MCU"*: `POST :7125/printer/firmware_restart`, wait ~13 s, retry. |
-| **AD5X — single color** | `cd ~/Desktop/3d_prints_tests/ad5x_tools && python3 ad5x.py send <file> --name "<Name>" --start` then the explicit `M6030` start. |
-| **AD5X — multicolor** | upload first (`ad5x.py send <file> --name "<Name>.gcode.3mf"`), then **`python3 ad5x_mc.py "<Name>.gcode.3mf" ~/print_work/ready/<file>.gcode.3mf --fire`** (auto-maps tools→slots, sends `/printGcode` with `useMatlStation`). Dry-run without `--fire` first to eyeball the map. |
+| **Bambu A2L / A1 mini** | implicit-FTPS upload (not the hanging explicit-FTPS path) + MQTT start + AMS color map |
+| **Ender 3** | Moonraker upload + start; on a 400 *"Lost communication with MCU"*, issues `FIRMWARE_RESTART` and retries after the recovery window |
+| **AD5X — single color** | `/printGcode` start (plain `M23` only *selects* a file, it doesn't start one) |
+| **AD5X — multicolor** | reads the gcode's tool colors + the *live* IFS slot state and auto-builds the `materialMappings` map before the start call — this is the fix for AD5X printing mono headless (see the main README's Keystone section) |
 
 ## Step 5 — PRINT + VERIFY
 
 - **Beds must be CLEAR before any start.** This is the one thing the agent cannot see — confirm on camera.
-- Confirm the printer transitions to *printing* (target temps climb, layer 0 begins).
+  `--bed-confirmed` exists precisely to gate on that human confirmation; don't pass it without one.
+- Confirm the printer transitions to *printing* (target temps climb, layer 0 begins) — `forge status`.
 - **Watch the first layer on camera:** adhesion good? For multicolor, do the slot colors actually swap?
-  (`ad5x.py watch` shows `currentSlot` live.)
-- If wrong: cancel immediately (printer touchscreen, `ad5x.py stop`, Moonraker cancel, or the kill switch).
+- If wrong: cancel immediately. **`forge` has no cancel/stop command yet** — use the printer's
+  touchscreen, Moonraker's own cancel endpoint (`POST :7125/printer/print/cancel`), or the kill switch.
 
 ## Step 6 — POST (close the loop)
 
