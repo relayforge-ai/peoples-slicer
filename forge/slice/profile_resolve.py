@@ -119,18 +119,38 @@ class ProfileIndex:
         return chain
 
     def flatten(self, name: str) -> dict[str, Any]:
-        """Deep-merge the inherits chain so the leaf's bed size wins over parents."""
+        """Deep-merge the inherits chain so the leaf's bed size wins over parents.
+
+        REL-631: ``inherits_chain`` appends the *requested* name before it ever confirms
+        that name resolves to a real file, so a completely empty index still returns a
+        nonempty chain (``[name]``). A nonempty chain is therefore not proof that any real
+        profile data exists. Raise unless at least one chain member actually loaded —
+        otherwise a caller silently gets back ``{"_flattened_from": [name]}``, a hollow
+        dict with no real settings, indistinguishable from a genuine profile at a glance
+        (this is exactly how ``forge slice --dry-run`` reported ``ok: true`` against zero
+        indexed profiles).
+        """
         chain = self.inherits_chain(name)
         if not chain:
             raise FileNotFoundError(f"profile not found: {name!r}")
         # Root first, then children — so leaf overrides win.
         merged: dict[str, Any] = {}
+        loaded_any = False
         for part in reversed(chain):
             try:
                 _, data = self.load_raw(part)
             except FileNotFoundError:
                 continue
             merged = _deep_merge(merged, data)
+            loaded_any = True
+        if not loaded_any:
+            raise FileNotFoundError(
+                f"profile not found: {name!r} — 0 profiles indexed from the configured "
+                f"profile root(s). Point BAMBU_PROFILES (or ORCA_PROFILES) at an extracted "
+                f"slicer AppImage's resources/profiles directory, e.g. run "
+                f"`<AppImage> --appimage-extract` and set the env var to "
+                f"squashfs-root/resources/profiles[/BBL]."
+            )
         merged.pop("inherits", None)
         merged["_flattened_from"] = chain
         return merged

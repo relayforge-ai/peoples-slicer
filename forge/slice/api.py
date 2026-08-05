@@ -182,15 +182,30 @@ def slice_for(
             orient=orient,
         )
 
-        # Sanity: flattened A1 mini must show 180 mm bed, never the parent 256.
-        if cmd.flattened_machine and cmd.flattened_machine.exists():
-            flat = json.loads(cmd.flattened_machine.read_text(encoding="utf-8"))
-            xy = printable_xy_mm(flat)
-            if xy is not None and abs(xy - spec.bed_xy_mm) > 5 and spec.key == "a1mini":
-                raise SliceError(
-                    f"flattened machine bed XY={xy} does not match a1mini 180 — "
-                    f"inherits chain not applied correctly"
-                )
+        # Sanity: the flattened machine profile must actually carry a printable_area that
+        # matches this printer's routing-table bed — never a missing one (REL-631: this
+        # guard previously only fired on a *wrong* bed size and only for a1mini, so a
+        # profile that resolved but never carried printable_area at all — or any printer
+        # besides a1mini — passed silently) and never the wrong parent's bed either.
+        if not cmd.flattened_machine or not cmd.flattened_machine.exists():
+            raise SliceError(
+                f"no machine profile resolved for {spec.key} — check BAMBU_PROFILES / "
+                f"ORCA_PROFILES (or FOUNDRY_ORCA_PROFILES) point at a real, extracted "
+                f"slicer profile tree"
+            )
+        flat = json.loads(cmd.flattened_machine.read_text(encoding="utf-8"))
+        xy = printable_xy_mm(flat)
+        if xy is None:
+            raise SliceError(
+                f"flattened machine profile for {spec.key} has no printable_area — "
+                f"profile resolution produced an incomplete profile "
+                f"({cmd.flattened_machine})"
+            )
+        if abs(xy - spec.bed_xy_mm) > 5:
+            raise SliceError(
+                f"flattened machine bed XY={xy} does not match {spec.key} "
+                f"{spec.bed_xy_mm} — inherits chain not applied correctly"
+            )
 
         if dry_run:
             return SliceResult(
