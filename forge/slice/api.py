@@ -182,23 +182,21 @@ def slice_for(
             orient=orient,
         )
 
-        # Sanity: the flattened machine profile must actually carry a printable_area that
-        # matches this printer's routing-table bed — never a missing one (REL-631: this
-        # guard previously only fired on a *wrong* bed size and only for a1mini, so a
-        # profile that resolved but never carried printable_area at all — or any printer
-        # besides a1mini — passed silently) and never the wrong parent's bed either.
-        if not cmd.flattened_machine or not cmd.flattened_machine.exists():
+        # Fail-closed machine profile check (REL-631 / zero parameter loss).
+        # printable_xy_mm() is None when the profile is empty — the old guard only
+        # fired on a *wrong* bed size, so dry-run returned ok=true on blank profiles.
+        if not cmd.flattened_machine or not Path(cmd.flattened_machine).is_file():
             raise SliceError(
                 f"no machine profile resolved for {spec.key} — check BAMBU_PROFILES / "
                 f"ORCA_PROFILES (or FOUNDRY_ORCA_PROFILES) point at a real, extracted "
                 f"slicer profile tree"
             )
-        flat = json.loads(cmd.flattened_machine.read_text(encoding="utf-8"))
+        flat = json.loads(Path(cmd.flattened_machine).read_text(encoding="utf-8"))
         xy = printable_xy_mm(flat)
         if xy is None:
             raise SliceError(
                 f"flattened machine profile for {spec.key} has no printable_area — "
-                f"profile resolution produced an incomplete profile "
+                f"empty or incomplete profile (refusing ok=true dry-run) "
                 f"({cmd.flattened_machine})"
             )
         if abs(xy - spec.bed_xy_mm) > 5:
@@ -206,6 +204,11 @@ def slice_for(
                 f"flattened machine bed XY={xy} does not match {spec.key} "
                 f"{spec.bed_xy_mm} — inherits chain not applied correctly"
             )
+        if not flat.get("printer_model") and not flat.get("name"):
+            raise SliceError(
+                f"flattened machine missing printer_model/name for {spec.key}"
+            )
+
 
         if dry_run:
             return SliceResult(

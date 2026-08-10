@@ -6,6 +6,9 @@ Stock profiles are not standalone. Example (A1 mini 0.4 nozzle):
 
 We deep-merge parent → child (child wins) so ``--load-settings`` gets a self-contained
 file and fit checks see the *effective* bed, not the parent's 256 mm plate.
+
+REL-631 / zero-parameter-loss: missing chain members and empty merges raise.
+Never report success from a hollow ``{"_flattened_from": [name]}`` profile.
 """
 from __future__ import annotations
 
@@ -103,17 +106,34 @@ class ProfileIndex:
         return path, data
 
     def inherits_chain(self, name: str) -> list[str]:
-        """Return [leaf, parent, …, root] names."""
+        """Return [leaf, parent, …, root] names.
+
+        Fail-closed: a missing leaf or a broken parent link raises. Silently
+        stopping mid-chain used to leave dry-run / slice looking "ok" with an
+        empty flattened profile (zero parameter loss violated).
+        """
         chain: list[str] = []
         seen: set[str] = set()
         cur: str | None = name
         while cur and cur not in seen:
             seen.add(cur)
-            chain.append(cur)
             try:
                 _, data = self.load_raw(cur)
-            except FileNotFoundError:
-                break
+            except FileNotFoundError as e:
+                if not chain:
+                    raise FileNotFoundError(
+                        f"profile not found: {cur!r} (requested leaf {name!r}). "
+                        f"{len(self.by_name)} profiles indexed from the configured root(s). "
+                        f"Point BAMBU_PROFILES (or ORCA_PROFILES) at an extracted slicer "
+                        f"AppImage's resources/profiles directory, e.g. run "
+                        f"`<AppImage> --appimage-extract` and set the env var to "
+                        f"squashfs-root/resources/profiles[/BBL]."
+                    ) from e
+                raise FileNotFoundError(
+                    f"broken inherits chain for {name!r}: missing parent {cur!r} "
+                    f"(resolved so far: {chain})"
+                ) from e
+            chain.append(cur)
             parent = data.get("inherits")
             cur = parent if isinstance(parent, str) and parent else None
         return chain
@@ -121,38 +141,32 @@ class ProfileIndex:
     def flatten(self, name: str) -> dict[str, Any]:
         """Deep-merge the inherits chain so the leaf's bed size wins over parents.
 
-        REL-631: ``inherits_chain`` appends the *requested* name before it ever confirms
-        that name resolves to a real file, so a completely empty index still returns a
-        nonempty chain (``[name]``). A nonempty chain is therefore not proof that any real
-        profile data exists. Raise unless at least one chain member actually loaded —
-        otherwise a caller silently gets back ``{"_flattened_from": [name]}``, a hollow
-        dict with no real settings, indistinguishable from a genuine profile at a glance
-        (this is exactly how ``forge slice --dry-run`` reported ``ok: true`` against zero
-        indexed profiles).
+        REL-631: never swallow missing members. A hollow
+        ``{"_flattened_from": [name]}`` must not look like success to dry-run.
         """
         chain = self.inherits_chain(name)
         if not chain:
             raise FileNotFoundError(f"profile not found: {name!r}")
         # Root first, then children — so leaf overrides win.
         merged: dict[str, Any] = {}
-        loaded_any = False
         for part in reversed(chain):
-            try:
-                _, data = self.load_raw(part)
-            except FileNotFoundError:
-                continue
+            _, data = self.load_raw(part)
             merged = _deep_merge(merged, data)
-            loaded_any = True
-        if not loaded_any:
-            raise FileNotFoundError(
-                f"profile not found: {name!r} — 0 profiles indexed from the configured "
-                f"profile root(s). Point BAMBU_PROFILES (or ORCA_PROFILES) at an extracted "
-                f"slicer AppImage's resources/profiles directory, e.g. run "
-                f"`<AppImage> --appimage-extract` and set the env var to "
-                f"squashfs-root/resources/profiles[/BBL]."
-            )
         merged.pop("inherits", None)
         merged["_flattened_from"] = chain
+        identity = (
+            merged.get("name")
+            or merged.get("printer_model")
+            or merged.get("printer_settings_id")
+            or merged.get("print_settings_id")
+            or merged.get("filament_settings_id")
+        )
+        if not identity and not merged.get("printable_area") and not merged.get("nozzle_diameter"):
+            raise FileNotFoundError(
+                f"profile flatten for {name!r} produced an empty settings object "
+                f"(chain={chain}) — refusing to treat as success. Point BAMBU_PROFILES "
+                f"(or ORCA_PROFILES) at an extracted slicer AppImage's resources/profiles."
+            )
         return merged
 
 
@@ -161,7 +175,7 @@ def bambu_index() -> ProfileIndex:
 
 
 def orca_index() -> ProfileIndex:
-    # Foundry overrides (Ender Klipper) first so name lookups prefer studio profiles.
+    # Foundry overrides first so name lookups prefer studio profiles.
     return ProfileIndex([DEFAULT_FOUNDRY_ORCA, DEFAULT_ORCA_PROFILES])
 
 
