@@ -37,14 +37,14 @@ def test_flatten_raises_on_completely_empty_index():
         idx.flatten("Bambu Lab A1 mini 0.4 nozzle")
 
 
-def test_flatten_raises_even_though_chain_is_nonempty():
-    """``inherits_chain`` appends the requested name before it ever confirms the name
-    resolves to a real file — a nonexistent-root index still returns a 1-element chain
-    (``[name]``). ``flatten`` must not treat a nonempty *chain* as proof of real data;
-    it must check that at least one chain member actually loaded."""
+def test_inherits_chain_raises_on_missing_leaf():
+    """``inherits_chain`` must not append the requested name and return a hollow
+    1-element chain when the leaf does not resolve — that was the REL-631 root cause
+    (flatten then skipped every load and returned ``{_flattened_from: [name]}``)."""
     idx = ProfileIndex(["/nonexistent/profile/root/for/rel631/test"])
-    chain = idx.inherits_chain("Bambu Lab A1 mini 0.4 nozzle")
-    assert chain == ["Bambu Lab A1 mini 0.4 nozzle"]  # nonempty, but nothing was ever loaded
+    with pytest.raises(FileNotFoundError) as ei:
+        idx.inherits_chain("Bambu Lab A1 mini 0.4 nozzle")
+    assert "profile not found" in str(ei.value).lower()
     with pytest.raises(FileNotFoundError):
         idx.flatten("Bambu Lab A1 mini 0.4 nozzle")
 
