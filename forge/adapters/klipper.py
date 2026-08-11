@@ -27,11 +27,14 @@ class KlipperAdapter:
       when Moonraker reports "Lost communication with MCU" — the common
       recoverable stall on these boards — instead of failing the job outright.
 
+    Generic to any Klipper board, not specific to one machine — config.py wires
+    this same class to both "ender" (MOONRAKER_URL) and "kobra3max"
+    (KOBRA_MOONRAKER_URL); the dispatcher's routing key comes from that config
+    entry's dict key, not from anything on this class.
+
     ``http_poster`` / ``status_fetcher`` are injection seams for tests; when
     left unset the adapter talks to ``moonraker_url`` over real HTTP.
     """
-
-    key = "ender"
 
     def __init__(
         self,
