@@ -11,14 +11,14 @@ from . import BRAND, __version__
 SUBCOMMANDS = (
     "discover", "review", "send", "status", "watch",
     "slice", "slice-send", "slice-batch", "harvest",
+    "gui",
 )
 
 
 def banner() -> str:
     return (
         f"{BRAND['product']} v{__version__} — {BRAND['tagline']}\n"
-        f"Part of {BRAND['umbrella']} · made in the Telchar studio "
-        f"→ {BRAND['home_url']}"
+        f"MIT open source · CLI {BRAND['cli']} · {BRAND['home_url']}"
     )
 
 
@@ -116,6 +116,14 @@ def build_parser() -> argparse.ArgumentParser:
     batch_p.add_argument("--no-auto-refit", action="store_true")
     batch_p.add_argument("--dry-run", action="store_true")
     batch_p.add_argument("--timeout", type=int, default=900)
+
+    gui_p = sub.add_parser(
+        "gui",
+        help="open the local Studio UI (localhost only — humans without agents)",
+    )
+    gui_p.add_argument("--port", type=int, default=8765, help="port (default 8765)")
+    gui_p.add_argument("--host", default="127.0.0.1", help="bind address (localhost only)")
+    gui_p.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
     return parser
 
 
@@ -310,6 +318,26 @@ def cmd_watch(args, config_path: str | None) -> int:
         )
     except KeyboardInterrupt:
         print("\nstopped")
+    return 0
+
+
+def cmd_gui(args, config_path: str | None) -> int:
+    """Local Studio UI for humans — same slice/review/send path as the CLI."""
+    from .gui_server import serve
+
+    try:
+        serve(
+            host=args.host,
+            port=int(args.port),
+            config_path=config_path,
+            open_browser=not args.no_browser,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"ERROR: could not bind Studio — {e}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -514,6 +542,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_harvest(args, config_path)
     if args.command == "slice-batch":
         return cmd_slice_batch(args, config_path)
+    if args.command == "gui":
+        return cmd_gui(args, config_path)
 
     print(f"unknown command: {args.command}", file=sys.stderr)
     return 1

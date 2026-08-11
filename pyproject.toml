@@ -3,18 +3,19 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "telchars-forge"
-version = "0.1.0"
-description = "Telchar's Forge — the harness that runs everything after the slice. Part of The People's Slicer."
+name = "peoples-slicer"
+version = "0.2.0"
+description = "The People's Slicer — agent-first headless slice & send, plus a local Studio GUI for humans. MIT."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-authors = [{ name = "RelayForge / Ryan Anderson" }]
-keywords = ["3d-printing", "slicer", "orcaslicer", "bambu", "flashforge", "klipper", "cli"]
+authors = [{ name = "People's Slicer contributors" }]
+keywords = ["3d-printing", "slicer", "orcaslicer", "bambu", "flashforge", "klipper", "cli", "agent"]
 dependencies = []
 
 [project.urls]
-Homepage = "https://telchar.relayforge.tools"
+Homepage = "https://github.com/relayforge-ai/peoples-slicer"
+Repository = "https://github.com/relayforge-ai/peoples-slicer"
 
 [project.optional-dependencies]
 bambu = ["paho-mqtt>=2"]
@@ -22,9 +23,14 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 forge = "forge.cli:main"
+peoples = "forge.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["forge*"]
+
+[tool.setuptools.package-data]
+# GUI lives at repo-root /gui; include via MANIFEST / package data for sdist.
+# Runtime resolves GUI_DIR relative to the package parent (source tree / editable install).
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -71,40 +71,36 @@ real, one-time setup cost:
 # 1. Install
 pipx install git+https://github.com/relayforge-ai/peoples-slicer     # or, from a clone: pipx install .
 
-# 2. Slice, headless (REL-600/601) — no GUI, no human required
+# 2a. Humans — open the local Studio (localhost only, no cloud)
+forge gui
+#    browser → Drop a model → pick printer → Slice → Review → Send
+#    same pipeline as the CLI; bed-clear still required for live send
+
+# 2b. Agents — headless (REL-600/601)
 forge slice model.stl --printer a1mini --dry-run             # resolve profiles + fit-check only
 forge slice model.stl --printer a1mini -o out.gcode.3mf       # the real slice
 forge slice model.stl --printer a2l --auto-refit              # scale to fit if oversized
 forge harvest                                                  # index Orca vendor profiles
 
-# 3. Point at a printer — every credential is read from the ENV; nothing is stored in the repo
-export AD5X_HOST=192.168.4.37 AD5X_SERIAL=… AD5X_CHECKCODE=…         # FlashForge AD5X
-#  or  export BAMBU_HOST=… BAMBU_ACCESS_CODE=… BAMBU_SERIAL=…        # Bambu A2L / A1 mini
-#  or  export MOONRAKER_URL=http://192.168.4.49:7125                 # Ender 3 / Klipper
+# 3. Point at a printer — credentials from ENV or your own FORGE_CONFIG (never in the repo)
+export AD5X_HOST=… AD5X_SERIAL=… AD5X_CHECKCODE=…             # FlashForge AD5X
+#  or  export BAMBU_HOST=… BAMBU_ACCESS_CODE=… BAMBU_SERIAL=…  # Bambu
+#  or  export MOONRAKER_URL=http://…                           # Klipper
 
-# 4. Find printers on the LAN (concurrent, streams results as found — a full /24 takes
-#    seconds, not minutes) and check a sliced file before it ever hits the machine
+# 4. Find printers on the LAN; audit a sliced file before it hits the machine
 forge discover --save ad5x
-forge review out.gcode.3mf            # audits the finicky, easily-dropped params for that printer
-forge send    out.gcode.3mf --dry-run # classify + review only, don't send
+forge review out.gcode.3mf
+forge send    out.gcode.3mf --dry-run
 
-# 5. Send — headless, zero parameter loss (AD5X multicolor IFS map auto-built).
-#    Live send requires --bed-confirmed (fail-closed guardian) — the one thing an agent
-#    cannot see for itself is whether the physical bed is actually clear.
+# 5. Send — headless, zero parameter loss. Live send needs --bed-confirmed.
 forge send out.gcode.3mf --bed-confirmed
-forge status                          # what's queued / printing
+forge status
 
-# One call, slice through send:
-forge slice-send model.stl --printer ad5x --dry-run          # slice + classify, no send
-forge slice-send model.stl --printer ad5x --bed-confirmed    # live send (guardian)
+forge slice-send model.stl --printer ad5x --dry-run
+forge slice-send model.stl --printer ad5x --bed-confirmed
 
-# Hands-off: drop files in a folder and forge routes them for you
 forge watch --dir ~/forge-drop
 ```
-
-**GUI (a human at a desktop, or when you'd rather slice by hand):** open OrcaSlicer, slice
-and export as usual, then `forge review` / `forge send` the exported file exactly as in
-steps 4–5 above — `forge` handles everything *after* the slice either way.
 
 `forge --help` lists every subcommand. **No keys are ever written to disk in the repo** — the
 adapter reads `AD5X_*` / `BAMBU_*` / `MOONRAKER_URL` (or a `FORGE_CONFIG` file you control) at runtime.
