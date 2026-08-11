@@ -16,11 +16,14 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     :class:`ValueError` naming the file rather than leaking a bare
     ``JSONDecodeError`` (mirroring :func:`forge.discover.merge_into_config`).
 
-    After the file is loaded, the ``AD5X_HOST`` / ``BAMBU_HOST`` /
-    ``MOONRAKER_URL`` env vars (with their optional credential companions) add or
-    replace the printer entries keyed ``"ad5x"`` / ``"bambu"`` / ``"ender"``
-    respectively, so an env var wins over a same-key file entry. This lets a
-    single exported host bring a printer online without a config file at all.
+    After the file is loaded, the ``AD5X_HOST`` / ``BAMBU_HOST`` / ``MOONRAKER_URL``
+    / ``KOBRA_MOONRAKER_URL`` env vars (with their optional credential companions)
+    add or replace the printer entries keyed ``"ad5x"`` / ``"bambu"`` / ``"ender"``
+    / ``"kobra3max"`` respectively, so an env var wins over a same-key file entry.
+    This lets a single exported host bring a printer online without a config file
+    at all. No default/fallback host is baked in here for any printer — this repo
+    is public, so every LAN address has to come from the environment, never a
+    hardcoded literal.
 
     Returns the config dict — always with a ``"printers"`` mapping — ready to
     hand to :func:`build_adapters`.
@@ -55,6 +58,11 @@ def load_config(path: str | None = None) -> dict[str, Any]:
         printers["ender"] = {
             "type": "klipper",
             "moonraker_url": os.environ["MOONRAKER_URL"],
+        }
+    if os.environ.get("KOBRA_MOONRAKER_URL"):
+        printers["kobra3max"] = {
+            "type": "klipper",
+            "moonraker_url": os.environ["KOBRA_MOONRAKER_URL"],
         }
     return cfg
 
