@@ -7,23 +7,76 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import os
 import re
 import tempfile
-import threading
-import traceback
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from . import BRAND, __version__
 
-GUI_DIR = Path(__file__).resolve().parent.parent / "gui"
+GUI_DIR = Path(__file__).resolve().parent / "gui"
 UPLOAD_ROOT = Path(tempfile.gettempdir()) / "peoples-slicer-studio"
-_JOBS: dict[str, dict[str, Any]] = {}
-_JOBS_LOCK = threading.Lock()
+MAX_JSON_BYTES = 1 * 1024 * 1024
+MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+class RequestTooLarge(ValueError):
+    """Raised before reading a request body that exceeds Studio's limits."""
+
+
+def _content_length(handler: BaseHTTPRequestHandler, *, limit: int) -> int:
+    raw = handler.headers.get("Content-Length")
+    if raw in (None, ""):
+        return 0
+    try:
+        length = int(raw)
+    except (TypeError, ValueError) as e:
+        raise ValueError("invalid Content-Length") from e
+    if length < 0:
+        raise ValueError("invalid Content-Length")
+    if length > limit:
+        raise RequestTooLarge(f"request body exceeds the {limit // (1024 * 1024)} MiB limit")
+    return length
+
+
+def _api_bool(value: Any, *, field: str, default: bool = False) -> bool:
+    """Parse JSON/form booleans without treating the string ``false`` as true."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"{field} must be true or false")
+
+
+def _is_local_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme in {"http", "https"} and parsed.hostname in _LOCAL_HOSTS
+    except ValueError:
+        return False
+
+
+def _is_trusted_browser_request(handler: BaseHTTPRequestHandler) -> bool:
+    """Reject browser POSTs initiated by a non-local page (CSRF/DNS rebinding)."""
+    if (handler.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site":
+        return False
+    browser_sources = [
+        handler.headers.get("Origin"),
+        handler.headers.get("Referer"),
+    ]
+    return all(not value or _is_local_url(value) for value in browser_sources)
 
 
 def _json_bytes(data: Any, code: int = 200) -> tuple[int, bytes, str]:
@@ -32,7 +85,7 @@ def _json_bytes(data: Any, code: int = 200) -> tuple[int, bytes, str]:
 
 
 def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    n = int(handler.headers.get("Content-Length") or 0)
+    n = _content_length(handler, limit=MAX_JSON_BYTES)
     raw = handler.rfile.read(n) if n else b"{}"
     if not raw:
         return {}
@@ -54,7 +107,7 @@ def _parse_multipart(handler: BaseHTTPRequestHandler) -> tuple[dict[str, str], d
     if not m:
         raise ValueError("missing multipart boundary")
     boundary = m.group(1).strip().strip('"').encode("ascii")
-    n = int(handler.headers.get("Content-Length") or 0)
+    n = _content_length(handler, limit=MAX_UPLOAD_BYTES)
     raw = handler.rfile.read(n)
     fields: dict[str, str] = {}
     files: dict[str, bytes] = {}
@@ -180,11 +233,11 @@ def _api_slice(body: dict[str, Any] | None = None, upload: Path | None = None) -
     if not printer:
         return _json_bytes({"ok": False, "error": "printer required"}, 400)
 
-    dry_run = bool(body.get("dry_run"))
-    auto_refit = body.get("auto_refit")
-    if auto_refit is None:
-        auto_refit = True
-    auto_refit = bool(auto_refit)
+    try:
+        dry_run = _api_bool(body.get("dry_run"), field="dry_run")
+        auto_refit = _api_bool(body.get("auto_refit"), field="auto_refit", default=True)
+    except ValueError as e:
+        return _json_bytes({"ok": False, "error": str(e)}, 400)
     output = body.get("output")
 
     try:
@@ -204,7 +257,6 @@ def _api_slice(body: dict[str, Any] | None = None, upload: Path | None = None) -
         return _json_bytes({
             "ok": False,
             "error": str(e),
-            "trace": traceback.format_exc(limit=6),
         }, 500)
 
     payload = {
@@ -221,8 +273,6 @@ def _api_slice(body: dict[str, Any] | None = None, upload: Path | None = None) -
         "dry_run": dry_run,
     }
     job_id = uuid.uuid4().hex[:12]
-    with _JOBS_LOCK:
-        _JOBS[job_id] = payload
     payload["job_id"] = job_id
     return _json_bytes(payload)
 
@@ -258,8 +308,11 @@ def _api_send(body: dict[str, Any], config_path: str | None) -> tuple[int, bytes
     if not p.is_file():
         return _json_bytes({"ok": False, "error": f"file not found: {p}"}, 400)
 
-    dry_run = bool(body.get("dry_run"))
-    bed = bool(body.get("bed_confirmed"))
+    try:
+        dry_run = _api_bool(body.get("dry_run"), field="dry_run")
+        bed = _api_bool(body.get("bed_confirmed"), field="bed_confirmed")
+    except ValueError as e:
+        return _json_bytes({"ok": False, "error": str(e)}, 400)
     if dry_run:
         from .reader import classify_file
         try:
@@ -307,7 +360,7 @@ def _api_send(body: dict[str, Any], config_path: str | None) -> tuple[int, bytes
         ok = result.get("state") in ("printing", "queued")
         return _json_bytes({"ok": ok, "dry_run": False, "result": result}, 200 if ok else 422)
     except Exception as e:
-        return _json_bytes({"ok": False, "error": str(e), "trace": traceback.format_exc(limit=6)}, 500)
+        return _json_bytes({"ok": False, "error": str(e)}, 500)
 
 
 def make_handler(config_path: str | None):
@@ -322,6 +375,14 @@ def make_handler(config_path: str | None):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "connect-src 'self'; img-src 'self' data:; base-uri 'none'; "
+                "form-action 'self'; frame-ancestors 'none'",
+            )
             self.end_headers()
             self.wfile.write(body)
 
@@ -330,7 +391,7 @@ def make_handler(config_path: str | None):
                 self._send(400, b"bad path", "text/plain")
                 return
             path = (GUI_DIR / (rel or "index.html")).resolve()
-            if not str(path).startswith(str(GUI_DIR.resolve())):
+            if not path.is_relative_to(GUI_DIR.resolve()):
                 self._send(403, b"forbidden", "text/plain")
                 return
             if path.is_dir():
@@ -367,6 +428,12 @@ def make_handler(config_path: str | None):
             u = urlparse(self.path)
             path = u.path
             try:
+                if not _is_trusted_browser_request(self):
+                    self._send(*_json_bytes({
+                        "ok": False,
+                        "error": "cross-site requests are not allowed",
+                    }, 403))
+                    return
                 if path == "/api/upload-slice":
                     fields, files = _parse_multipart(self)
                     blob = files.get("file") or files.get("model")
@@ -377,10 +444,15 @@ def make_handler(config_path: str | None):
                     saved = _save_upload(name, blob)
                     body = {
                         "printer": fields.get("printer") or "",
-                        "dry_run": (fields.get("dry_run") or "").lower() in ("1", "true", "yes"),
-                        "auto_refit": (fields.get("auto_refit") or "true").lower() not in ("0", "false", "no"),
+                        "dry_run": _api_bool(fields.get("dry_run"), field="dry_run"),
+                        "auto_refit": _api_bool(
+                            fields.get("auto_refit"), field="auto_refit", default=True
+                        ),
                     }
-                    self._send(*_api_slice(body, upload=saved))
+                    try:
+                        self._send(*_api_slice(body, upload=saved))
+                    finally:
+                        saved.unlink(missing_ok=True)
                     return
 
                 body = _read_json(self)
@@ -394,13 +466,14 @@ def make_handler(config_path: str | None):
                     self._send(*_api_send(body, config_path))
                     return
                 self._send(*_json_bytes({"ok": False, "error": "not found"}, 404))
+            except RequestTooLarge as e:
+                self._send(*_json_bytes({"ok": False, "error": str(e)}, 413))
             except ValueError as e:
                 self._send(*_json_bytes({"ok": False, "error": str(e)}, 400))
             except Exception as e:
                 self._send(*_json_bytes({
                     "ok": False,
                     "error": str(e),
-                    "trace": traceback.format_exc(limit=8),
                 }, 500))
 
     return Handler

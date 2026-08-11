@@ -71,7 +71,6 @@ def slice_batch(
     # First batch only for this call (caller loops)
     batch = batches[0]
     out_dir = Path(out_dir or Path.home() / ".forge" / "sliced" / "a1mini_batch")
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     configured = False
     gcode_path = None
@@ -104,6 +103,8 @@ def slice_batch(
         for m in batch.models:
             result.plates.append({"model": m, "status": "planned"})
         return result
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Optionally pre-build a machine profile with plate_change for operators
     if configured and gcode:

@@ -29,8 +29,7 @@ peoples = "forge.cli:main"
 include = ["forge*"]
 
 [tool.setuptools.package-data]
-# GUI lives at repo-root /gui; include via MANIFEST / package data for sdist.
-# Runtime resolves GUI_DIR relative to the package parent (source tree / editable install).
+forge = ["gui/*.html", "gui/*.css", "gui/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
