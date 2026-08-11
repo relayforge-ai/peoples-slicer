@@ -1,4 +1,4 @@
-"""REL-600 / REL-601 — multi-printer headless slice + plate policy for Telchar's Forge.
+"""REL-600 / REL-601 — multi-printer headless slice + plate policy for People's Slicer.
 
 Public seam:
   ``slice_for(model, printer)`` — flatten profiles, fit-check, Bambu/Orca backends

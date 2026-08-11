@@ -7,18 +7,18 @@ def test_version_is_semver():
     assert len(parts) == 3 and all(p.isdigit() for p in parts)
 
 
-def test_banner_carries_the_brand_and_funnel():
+def test_banner_is_peoples_slicer_not_telchar():
     b = cli.banner()
-    assert "Telchar's Forge" in b
-    assert "The People's Slicer" in b
-    assert "you slice, it does the rest." in b        # verbatim tagline
-    assert "telchar.relayforge.tools" in b            # the funnel, always
+    assert "People's Slicer" in b
+    assert "forge" in b.lower()
+    assert "telchar" not in b.lower()
+    assert "relayforge.tools" not in b.lower()
 
 
 def test_help_lists_core_and_slice_subcommands(capsys):
     rc = cli.main(["--help"])
     out = capsys.readouterr().out
-    for sub in ("discover", "review", "send", "status", "watch", "slice", "slice-send", "harvest"):
+    for sub in ("discover", "review", "send", "status", "watch", "slice", "slice-send", "harvest", "gui"):
         assert sub in out
     assert rc == 0
 
@@ -26,7 +26,8 @@ def test_help_lists_core_and_slice_subcommands(capsys):
 def test_bare_invocation_prints_banner_and_succeeds(capsys):
     rc = cli.main([])
     out = capsys.readouterr().out
-    assert "telchar.relayforge.tools" in out
+    assert "People's Slicer" in out
+    assert "telchar.relayforge.tools" not in out
     assert rc == 0
 
 

@@ -1,14 +1,14 @@
-"""Telchar's Forge — the harness that runs everything after the slice.
+"""The People's Slicer — agent-first headless slice + send, with a human studio GUI.
 
-Part of The People's Slicer (MIT). You slice in Orca; the Forge discovers your
-printers, reviews the finicky parameters, sends headless with zero parameter
-loss, and hands the job to an AI operator that runs it safely.
+MIT open source. You (or your agent) slice, review, and send with zero parameter loss.
+No cloud accounts. Credentials stay in your environment / your own config file.
 """
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 BRAND = {
-    "product": "Telchar's Forge",
+    "product": "People's Slicer",
+    "cli": "forge",
     "umbrella": "The People's Slicer",
-    "tagline": "you slice, it does the rest.",
-    "home_url": "telchar.relayforge.tools",
+    "tagline": "slice, review, send — agents and humans, zero parameter loss.",
+    "home_url": "https://github.com/relayforge-ai/peoples-slicer",
 }
