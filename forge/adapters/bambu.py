@@ -354,19 +354,33 @@ class BambuAdapter:
             return remote_name
 
         tool_cols = self.tool_colors(gcode_path)
+        use_ams = False
         if ams_mapping is not None:
             mapping = ams_mapping
+            use_ams = bool(mapping)
         else:
-            if len(tool_cols) > 1:
-                state = self._fetch_print_state()
+            if tool_cols:
+                try:
+                    state = self._fetch_print_state()
+                except Exception:
+                    if len(tool_cols) > 1:
+                        raise
+                    state = {}
                 trays = self.parse_ams_trays(state.get("ams", {}))
-                if not trays:
+                if trays:
+                    mapping = self.build_ams_mapping(tool_cols, trays)
+                    use_ams = True
+                elif len(tool_cols) > 1:
                     raise RuntimeError("No AMS trays reported — cannot map multicolor job")
-                mapping = self.build_ams_mapping(tool_cols, trays)
+                else:
+                    # A one-tool job can still run from an external spool when
+                    # no AMS is attached. If AMS trays do exist, the branch
+                    # above maps the 3MF's approved/default color to one of
+                    # them instead of silently forcing external-spool mode.
+                    mapping = [0]
             else:
                 mapping = [0]
         is_bundle = path.suffix == ".3mf" or path.name.endswith(".gcode.3mf")
-        use_ams = len(tool_cols) > 1
         payload = {
             "print": {
                 "sequence_id": self._next_seq(),
