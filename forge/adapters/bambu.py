@@ -11,6 +11,7 @@ import ssl
 import ftplib
 import threading
 import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -108,16 +109,39 @@ class BambuAdapter:
             with zipfile.ZipFile(gcode_path) as zf:
                 gc_name = next(n for n in zf.namelist() if n.endswith("plate_1.gcode"))
                 text = zf.read(gc_name).decode("utf-8", errors="replace")
+                names = set(zf.namelist())
+                slice_info = (zf.read("Metadata/slice_info.config")
+                              if "Metadata/slice_info.config" in names else None)
         else:
             text = path.read_text(encoding="utf-8", errors="replace")
+            names = set()
+            slice_info = None
+        palette: list[str] = []
         for line in text.splitlines():
             if line.startswith("; filament_colour"):
-                return [
+                palette = [
                     c.strip()
                     for c in line.split("=", 1)[1].strip().split(";")
                     if c.strip()
                 ]
-        return []
+                break
+        # Bambu/Orca can leave unused palette colors in the g-code header.
+        # slice_info.config records the tools actually consumed by this plate;
+        # use it when present so a one-tool print is not mapped as multicolor.
+        if palette and slice_info is not None:
+            try:
+                root = ET.fromstring(slice_info)
+                used_ids = sorted({
+                    int(node.attrib["id"])
+                    for node in root.iter("filament")
+                    if node.attrib.get("used_for_object", "true").lower() == "true"
+                })
+                used = [palette[index - 1] for index in used_ids if 0 < index <= len(palette)]
+                if used:
+                    return used
+            except (ET.ParseError, KeyError, ValueError):
+                pass
+        return palette
 
     @staticmethod
     def parse_ams_trays(ams_state: dict) -> list[dict]:

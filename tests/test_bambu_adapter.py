@@ -164,6 +164,20 @@ def _make_single_color_3mf(path, color="#00FF00"):
         )
 
 
+def _make_single_used_color_with_extra_palette_3mf(path):
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "Metadata/plate_1.gcode",
+            "; filament_colour = #00FF00;#D4B1DD;#4D3C22;#FFFFFF\nG28\n",
+        )
+        zf.writestr(
+            "Metadata/slice_info.config",
+            '<?xml version="1.0"?><config><plate>'
+            '<filament id="1" color="#00FF00" used_for_object="true"/>'
+            '</plate></config>',
+        )
+
+
 def test_multicolor_send_auto_maps_ams(tmp_path):
     mc = tmp_path / "trio.gcode.3mf"
     _make_multicolor_3mf(str(mc))
@@ -211,6 +225,13 @@ def test_single_color_send_uses_nearest_loaded_ams_tray(tmp_path):
 
     assert published[0]["print"]["use_ams"] is True
     assert published[0]["print"]["ams_mapping"] == [0]
+
+
+def test_tool_colors_ignores_unused_3mf_palette_entries(tmp_path):
+    job = tmp_path / "single-with-palette.gcode.3mf"
+    _make_single_used_color_with_extra_palette_3mf(str(job))
+
+    assert BambuAdapter.tool_colors(str(job)) == ["#00FF00"]
 
 
 def test_single_color_send_allows_external_spool_when_no_ams(tmp_path):
