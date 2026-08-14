@@ -228,7 +228,12 @@ class BambuAdapter:
                 with open(local_path, "rb") as fh:
                     ftp.storbinary(f"STOR /{remote_name}", fh)
                 self._verify_remote_size(ftp, remote_name, expected)
-                ftp.quit()
+                # The transfer and remote SIZE check are already complete.
+                # A1-mini firmware can hang forever waiting for QUIT's reply,
+                # which prevents the subsequent MQTT start from ever running.
+                # Close the verified control socket locally instead.
+                ftp.close()
+                ftp = None
                 return f"/{remote_name}"
             except Exception as exc:  # noqa: BLE001 - retry landmine
                 last_err = exc
