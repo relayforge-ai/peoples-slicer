@@ -43,6 +43,8 @@ def test_upload_verifies_remote_size(tmp_path, monkeypatch):
     class FakeFTP:
         def __init__(self):
             self.stored = b""
+            self.closed = False
+            self.quit_called = False
 
         def connect(self, *_a, **_k):
             pass
@@ -60,7 +62,10 @@ def test_upload_verifies_remote_size(tmp_path, monkeypatch):
             return len(self.stored)
 
         def quit(self):
-            pass
+            self.quit_called = True
+
+        def close(self):
+            self.closed = True
 
     fake = FakeFTP()
     monkeypatch.setattr(
@@ -71,6 +76,8 @@ def test_upload_verifies_remote_size(tmp_path, monkeypatch):
     local.write_bytes(b"slice-data")
     remote = BambuAdapter("h", "c", "s")._upload(str(local), local.name)
     assert remote == f"/{local.name}"
+    assert fake.closed is True
+    assert fake.quit_called is False
 
 
 def test_upload_rejects_size_mismatch(tmp_path, monkeypatch):
