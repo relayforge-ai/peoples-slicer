@@ -156,6 +156,14 @@ def _make_multicolor_3mf(path):
         )
 
 
+def _make_single_color_3mf(path, color="#00FF00"):
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "Metadata/plate_1.gcode",
+            f"; filament_colour = {color}\nG28\n",
+        )
+
+
 def test_multicolor_send_auto_maps_ams(tmp_path):
     mc = tmp_path / "trio.gcode.3mf"
     _make_multicolor_3mf(str(mc))
@@ -173,6 +181,78 @@ def test_multicolor_send_auto_maps_ams(tmp_path):
     a.send(str(mc), start=True)
     assert published
     assert published[0]["print"]["ams_mapping"] == [3, 0, 1]
+
+
+def test_single_color_send_uses_nearest_loaded_ams_tray(tmp_path):
+    job = tmp_path / "single.gcode.3mf"
+    _make_single_color_3mf(str(job), "#00FF00")
+    trays = {
+        "ams": [{
+            "id": "0",
+            "tray": [
+                {"id": "0", "tray_color": "0086D6FF", "tray_type": "PLA"},
+                {"id": "1", "tray_color": "000000FF", "tray_type": "PLA"},
+                {"id": "2", "tray_color": "E9AFCFFF", "tray_type": "PLA"},
+                {"id": "3", "tray_color": "FFFFFFFF", "tray_type": "PLA"},
+            ],
+        }]
+    }
+    published = []
+    adapter = BambuAdapter(
+        "h",
+        "access",
+        "serial",
+        ftps_uploader=lambda _local, name: f"/{name}",
+        state_fetcher=lambda: {"ams": trays},
+        mqtt_publisher=lambda payload, _wait: (published.append(payload) or {"ok": True}),
+    )
+
+    adapter.send(str(job), start=True)
+
+    assert published[0]["print"]["use_ams"] is True
+    assert published[0]["print"]["ams_mapping"] == [0]
+
+
+def test_single_color_send_allows_external_spool_when_no_ams(tmp_path):
+    job = tmp_path / "single.gcode.3mf"
+    _make_single_color_3mf(str(job))
+    published = []
+    adapter = BambuAdapter(
+        "h",
+        "access",
+        "serial",
+        ftps_uploader=lambda _local, name: f"/{name}",
+        state_fetcher=lambda: {},
+        mqtt_publisher=lambda payload, _wait: (published.append(payload) or {"ok": True}),
+    )
+
+    adapter.send(str(job), start=True)
+
+    assert published[0]["print"]["use_ams"] is False
+    assert published[0]["print"]["ams_mapping"] == [0]
+
+
+def test_single_color_send_allows_external_spool_when_ams_read_fails(tmp_path):
+    job = tmp_path / "single.gcode.3mf"
+    _make_single_color_3mf(str(job))
+    published = []
+
+    def failed_state_read():
+        raise TimeoutError("AMS state unavailable")
+
+    adapter = BambuAdapter(
+        "h",
+        "access",
+        "serial",
+        ftps_uploader=lambda _local, name: f"/{name}",
+        state_fetcher=failed_state_read,
+        mqtt_publisher=lambda payload, _wait: (published.append(payload) or {"ok": True}),
+    )
+
+    adapter.send(str(job), start=True)
+
+    assert published[0]["print"]["use_ams"] is False
+    assert published[0]["print"]["ams_mapping"] == [0]
 
 
 def test_tool_colors_reads_from_3mf(tmp_path):
