@@ -24,12 +24,18 @@ ENDER_HEADER = """; printer_model = Creality Ender-3 Pro
 ; filament: 1
 """
 
+KOBRA_HEADER = """; printer_model = Anycubic Kobra 3 Max 0.4 nozzle
+; filament_type = PLA
+; filament: 1
+"""
+
 
 # Real two-color AD5X encoding (from the red+blue sandal pair sliced live).
 MULTI_HEADER = """; printer_model = Flashforge AD5X
 ; filament_type = TPU;TPU
 ; filament: 1,2
 ; filament_colour = #F72224;#2750E0
+; enable_prime_tower = 1
 ; total filament used [g] = 68.26
 ; estimated printing time (normal mode) = 3h 02m 10s
 """
@@ -53,6 +59,12 @@ def test_colors_defaults_to_one():
 
 def test_colors_counts_multicolor():
     assert classify(MULTI_HEADER).colors == 2
+
+
+def test_prime_tower_setting_is_machine_readable():
+    assert classify(MULTI_HEADER).prime_tower_enabled is True
+    assert classify("; enable_prime_tower = 0\n").prime_tower_enabled is False
+    assert classify("; no tower setting\n").prime_tower_enabled is None
 
 
 def test_est_seconds_parsed_h_m_s():
@@ -103,6 +115,15 @@ def test_printer_settings_id_fallback_when_model_blank():
 
 def test_ender_header_routes_to_ender():
     assert classify(ENDER_HEADER).printer == "ender"
+
+
+def test_kobra_header_routes_to_kobra3max_before_generic_klipper():
+    assert classify(KOBRA_HEADER).printer == "kobra3max"
+
+
+def test_kobra_settings_id_routes_to_kobra3max():
+    h = "; printer_settings_id = Anycubic Kobra 3 Max 0.4 nozzle\n"
+    assert classify(h).printer == "kobra3max"
 
 
 def test_unknown_printer_model_routes_to_none():

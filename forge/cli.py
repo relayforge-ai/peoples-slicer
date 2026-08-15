@@ -167,6 +167,7 @@ def cmd_send(args, config_path: str | None) -> int:
         "printer": info.printer,
         "material": info.material,
         "colors": info.colors,
+        "prime_tower_enabled": info.prime_tower_enabled,
         "est_seconds": info.est_seconds,
         "est_grams": info.est_grams,
     }, indent=2))
@@ -436,6 +437,7 @@ def cmd_slice_send(args, config_path: str | None) -> int:
             "printer": info.printer,
             "material": info.material,
             "colors": info.colors,
+            "prime_tower_enabled": info.prime_tower_enabled,
             "est_seconds": info.est_seconds,
             "est_grams": info.est_grams,
         }, indent=2))

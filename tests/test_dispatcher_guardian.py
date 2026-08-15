@@ -42,3 +42,26 @@ def test_submit_vetoed_by_guardian(tmp_path, monkeypatch):
     result = dispatcher.submit(str(gcode), bed_confirmed_clear=False)
     assert result["state"] == "vetoed"
     assert adapter.sent == []
+
+
+def test_submit_carries_prime_tower_custody_into_guardian(tmp_path):
+    gcode = tmp_path / "unsafe-multicolor.gcode"
+    gcode.write_text(
+        "; printer_model = Flashforge AD5X\n"
+        "; filament_type = PLA;PLA\n"
+        "; filament_colour = #FF0000;#00FF00\n"
+        "; enable_prime_tower = 0\n"
+    )
+    adapter = FakeAdapter()
+    dispatcher = Dispatcher(
+        adapters={"ad5x": adapter},
+        queue=JobQueue(str(tmp_path / "q.json")),
+        guardian=Guardian(),
+    )
+
+    result = dispatcher.submit(str(gcode), bed_confirmed_clear=True)
+
+    assert result["state"] == "vetoed"
+    assert result["prime_tower_enabled"] is False
+    assert "prime_tower" in result["reason"]
+    assert adapter.sent == []

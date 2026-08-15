@@ -36,9 +36,10 @@ class AD5XAdapter:
       timeout and verifies the written byte count against ``M29``'s echoed
       ``size:`` — a truncated transfer (this project's core landmine) raises
       rather than silently starting a print on a bad file.
-    - a multicolor ``.3mf`` must additionally start via the 8898 ``/printGcode``
-      keystone carrying the IFS ``materialMappings`` (``send_multicolor``);
-      without it the AD5X ignores the color assignments and prints mono.
+    - a multicolor zipped ``.3mf`` or plain ``.gcode`` must additionally start
+      via the 8898 ``/printGcode`` keystone carrying the IFS
+      ``materialMappings`` (``send_multicolor``); without it the AD5X ignores
+      the color assignments and prints mono.
 
     ``detail_fetcher`` / ``api_poster`` are injection seams for tests and offline
     use; when left unset the adapter talks to ``host`` over real HTTP.
@@ -102,6 +103,24 @@ class AD5XAdapter:
             return self._detail_fetcher()
         return self._api("/detail", self._auth_body()).get("detail", {})
 
+    def list_files(self) -> list[dict]:
+        """Return the AD5X's stored-file inventory with slice metadata.
+
+        ``/gcodeList`` returns filenames and detail rows as two parallel
+        collections.  Joining them here gives callers one stable, testable
+        shape and keeps authentication/protocol details inside the adapter.
+        Missing detail is preserved as an empty row; a filename alone is not
+        evidence that a raw 3MF is actually printable.
+        """
+        response = self._api("/gcodeList", self._auth_body())
+        names = [name for name in response.get("gcodeList", []) if isinstance(name, str)]
+        details = {
+            row.get("gcodeFileName"): row
+            for row in response.get("gcodeListDetail", [])
+            if isinstance(row, dict) and isinstance(row.get("gcodeFileName"), str)
+        }
+        return [{"name": name, **details.get(name, {})} for name in names]
+
     def status(self) -> str:
         try:
             return self._map_status(self.detail().get("status"))
@@ -142,9 +161,9 @@ class AD5XAdapter:
             )
 
     def _is_multicolor(self, gcode_path: str) -> bool:
-        # A multicolor AD5X job is a .3mf (zip) whose gcode lists >1 filament_colour.
-        if not zipfile.is_zipfile(gcode_path):
-            return False
+        # Both Flash Studio's zipped 3MF jobs and Orca's plain-text G-code can
+        # carry a multicolor palette.  Treating only ZIPs as multicolor silently
+        # drops the IFS mapping for headless Orca output.
         try:
             return len(self.tool_colors(gcode_path)) > 1
         except Exception:
@@ -189,19 +208,26 @@ class AD5XAdapter:
         return remote
 
     @staticmethod
-    def tool_colors(local_3mf: str) -> list[str]:
-        with zipfile.ZipFile(local_3mf) as zf:
-            gc_name = next(n for n in zf.namelist() if n.endswith("plate_1.gcode"))
-            with zf.open(gc_name) as fh:
-                for raw in fh:
-                    line = raw.decode("utf-8", "replace")
-                    if line.startswith("; filament_colour"):
-                        return [
-                            c.strip()
-                            for c in line.split("=", 1)[1].strip().split(";")
-                            if c.strip()
-                        ]
-        return []
+    def tool_colors(gcode_path: str) -> list[str]:
+        def _from_lines(lines) -> list[str]:
+            for raw in lines:
+                line = raw.decode("utf-8", "replace")
+                if line.startswith("; filament_colour") and "=" in line:
+                    return [
+                        c.strip()
+                        for c in line.split("=", 1)[1].strip().split(";")
+                        if c.strip()
+                    ]
+            return []
+
+        if zipfile.is_zipfile(gcode_path):
+            with zipfile.ZipFile(gcode_path) as zf:
+                gc_name = next(n for n in zf.namelist() if n.endswith("plate_1.gcode"))
+                with zf.open(gc_name) as fh:
+                    return _from_lines(fh)
+
+        with open(gcode_path, "rb") as fh:
+            return _from_lines(fh)
 
     @staticmethod
     def _rgb(color: str) -> tuple[int, int, int]:

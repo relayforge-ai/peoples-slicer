@@ -11,9 +11,15 @@ import ssl
 import ftplib
 import threading
 import zipfile
+from contextlib import contextmanager
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Callable, Optional
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows operator consoles
+    fcntl = None  # type: ignore
 
 try:
     import paho.mqtt.client as mqtt
@@ -77,6 +83,27 @@ class BambuAdapter:
     def _next_seq(self) -> str:
         self._seq += 1
         return str(self._seq)
+
+    @contextmanager
+    def _mqtt_lock(self):
+        """Share the studio-wide per-printer MQTT lock with queue_push and
+        filament_state. Bambu firmware accepts very few simultaneous clients;
+        an uncoordinated pushall can otherwise time out while the dedicated
+        filament reader succeeds moments later."""
+        # ``fcntl`` is POSIX-only.  Windows consoles must remain importable;
+        # DAWES is the Linux dispatch authority that owns this shared lock.
+        if fcntl is None:
+            yield
+            return
+        lock_dir = Path.home() / "print_work" / ".locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = lock_dir / f"bambu-{self.host.replace('.', '_')}.lock"
+        with lock_path.open("a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     @staticmethod
     def _tls_context() -> ssl.SSLContext:
@@ -225,8 +252,28 @@ class BambuAdapter:
                 ftp.connect(self.host, self.ftps_port, timeout=120)
                 ftp.login("bblp", self.access_code)
                 ftp.prot_p()
+                # The control session may legitimately need the wider connect
+                # budget, but an 8 MiB LAN data stream must not spend two full
+                # minutes waiting for the Mini's missing TLS close_notify.
+                # New data sockets inherit ``FTP.timeout``.
+                ftp.timeout = 30
                 with open(local_path, "rb") as fh:
-                    ftp.storbinary(f"STOR /{remote_name}", fh)
+                    try:
+                        ftp.storbinary(f"STOR /{remote_name}", fh)
+                    except TimeoutError:
+                        # A1-mini firmware can receive every byte and then never
+                        # complete TLS close_notify on the DATA socket. ftplib
+                        # raises from SSLSocket.unwrap() after the send loop, so
+                        # this is not evidence that the upload failed. The
+                        # control channel may now contain a stale 226 reply;
+                        # discard it, reconnect, and let the exact remote SIZE
+                        # check below decide. A short/truncated transfer still
+                        # fails closed and enters the normal retry path.
+                        ftp.close()
+                        ftp = ImplicitFTP_TLS(context=ctx)
+                        ftp.connect(self.host, self.ftps_port, timeout=120)
+                        ftp.login("bblp", self.access_code)
+                        ftp.prot_p()
                 self._verify_remote_size(ftp, remote_name, expected)
                 # The transfer and remote SIZE check are already complete.
                 # A1-mini firmware can hang forever waiting for QUIT's reply,
@@ -281,22 +328,23 @@ class BambuAdapter:
             client.on_message = on_message
 
         client.on_connect = on_connect
-        client.connect(self.host, self.mqtt_port, keepalive=30)
-        client.loop_start()
-        if not connected.wait(8):
+        with self._mqtt_lock():
+            client.connect(self.host, self.mqtt_port, keepalive=30)
+            client.loop_start()
+            if not connected.wait(8):
+                client.loop_stop()
+                client.disconnect()
+                return None
+
+            client.publish(self.topic_pub, json.dumps(payload))
+            if wait_reply:
+                got_reply.wait(10)
+
             client.loop_stop()
             client.disconnect()
-            return None
-
-        client.publish(self.topic_pub, json.dumps(payload))
-        if wait_reply:
-            got_reply.wait(10)
-
-        client.loop_stop()
-        client.disconnect()
         return result[0]
 
-    def _fetch_print_state(self) -> dict:
+    def _fetch_print_state(self, *, required_field: str | None = None) -> dict:
         if self._state_fetcher is not None:
             return self._state_fetcher()
         result: list[dict] = [{}]
@@ -319,36 +367,48 @@ class BambuAdapter:
             try:
                 data = json.loads(msg.payload)
                 if "print" in data:
-                    result[0] = data["print"]
-                    got.set()
+                    # Bambu sends pushall as several partial MQTT messages.  Do
+                    # not let an early temperature/status delta satisfy a caller
+                    # that explicitly needs the later AMS snapshot.
+                    result[0].update(data["print"])
+                    required_ready = required_field in result[0]
+                    if required_field == "ams":
+                        ams = result[0].get("ams")
+                        required_ready = (
+                            isinstance(ams, dict) and isinstance(ams.get("ams"), list)
+                        )
+                    if required_field is None or required_ready:
+                        got.set()
             except json.JSONDecodeError:
                 pass
 
         client.on_message = on_message
         client.on_connect = on_connect
-        client.connect(self.host, self.mqtt_port, keepalive=30)
-        client.loop_start()
-        if not connected.wait(8):
+        with self._mqtt_lock():
+            client.connect(self.host, self.mqtt_port, keepalive=30)
+            client.loop_start()
+            if not connected.wait(8):
+                client.loop_stop()
+                client.disconnect()
+                return {}
+
+            client.publish(
+                self.topic_pub,
+                json.dumps(
+                    {
+                        "pushing": {
+                            "sequence_id": self._next_seq(),
+                            "command": "start",
+                            "version": 1,
+                            "push_target": 1,
+                        }
+                    }
+                ),
+            )
+            got.wait(20 if required_field is not None else 8)
+
             client.loop_stop()
             client.disconnect()
-            return {}
-
-        client.publish(
-            self.topic_pub,
-            json.dumps(
-                {
-                    "pushing": {
-                        "sequence_id": self._next_seq(),
-                        "command": "start",
-                        "version": 1,
-                        "push_target": 1,
-                    }
-                }
-            ),
-        )
-        got.wait(8)
-        client.loop_stop()
-        client.disconnect()
         return result[0]
 
     def status(self) -> str:
@@ -390,11 +450,15 @@ class BambuAdapter:
         else:
             if tool_cols:
                 try:
-                    state = self._fetch_print_state()
+                    state = self._fetch_print_state(required_field="ams")
                 except Exception:
-                    if len(tool_cols) > 1:
-                        raise
-                    state = {}
+                    raise RuntimeError(
+                        "AMS state unavailable — refusing to guess external spool"
+                    )
+                if "ams" not in state:
+                    raise RuntimeError(
+                        "AMS snapshot incomplete — refusing to guess external spool"
+                    )
                 trays = self.parse_ams_trays(state.get("ams", {}))
                 if trays:
                     mapping = self.build_ams_mapping(tool_cols, trays)

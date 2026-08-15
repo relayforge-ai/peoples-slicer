@@ -53,6 +53,7 @@ def test_kobra_and_ender_are_independent_entries(monkeypatch):
 
 
 def test_no_env_vars_means_no_kobra_entry(monkeypatch):
+    monkeypatch.delenv("FORGE_CONFIG", raising=False)
     monkeypatch.delenv("KOBRA_MOONRAKER_URL", raising=False)
     monkeypatch.delenv("AD5X_HOST", raising=False)
     monkeypatch.delenv("BAMBU_HOST", raising=False)

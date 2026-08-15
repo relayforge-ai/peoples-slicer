@@ -1,12 +1,20 @@
 """Bambu adapter — AMS color mapping, upload verify, and multicolor send wiring."""
 import zipfile
 
+import forge.adapters.bambu as bambu_module
 from forge.adapters.bambu import BambuAdapter
 from forge import fixtures
 
 
 def test_mqtt_color_to_hex_strips_alpha():
     assert BambuAdapter._mqtt_color_to_hex("D3B7A7FF") == "#D3B7A7"
+
+
+def test_mqtt_lock_degrades_without_posix_fcntl(monkeypatch):
+    monkeypatch.setattr(bambu_module, "fcntl", None)
+    adapter = BambuAdapter("host", "code", "serial")
+    with adapter._mqtt_lock():
+        pass
 
 
 def test_parse_ams_trays_from_fixture():
@@ -155,6 +163,50 @@ def test_upload_closes_connection_before_retrying(tmp_path, monkeypatch):
     assert made[0].closed is True  # the failed first attempt was cleaned up
 
 
+def test_upload_accepts_data_close_timeout_only_after_fresh_size_verify(tmp_path, monkeypatch):
+    shared = {"stored": b""}
+    made = []
+
+    class TimeoutAfterTransferFTP:
+        def __init__(self):
+            self.closed = False
+            made.append(self)
+
+        def connect(self, *_args, **_kwargs):
+            pass
+
+        def login(self, *_args, **_kwargs):
+            pass
+
+        def prot_p(self):
+            pass
+
+        def storbinary(self, _cmd, fh):
+            shared["stored"] = fh.read()
+            raise TimeoutError("TLS unwrap timed out after transfer")
+
+        def size(self, _path):
+            return len(shared["stored"])
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        "forge.adapters.bambu.ImplicitFTP_TLS",
+        lambda *args, **kwargs: TimeoutAfterTransferFTP(),
+    )
+    local = tmp_path / "job.gcode.3mf"
+    local.write_bytes(b"verified-slice-data")
+
+    remote = BambuAdapter("h", "c", "s", upload_retries=1)._upload(
+        str(local), local.name
+    )
+
+    assert remote == f"/{local.name}"
+    assert len(made) == 2
+    assert made[0].closed is True
+
+
 def _make_multicolor_3mf(path):
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(
@@ -250,7 +302,10 @@ def test_single_color_send_allows_external_spool_when_no_ams(tmp_path):
         "access",
         "serial",
         ftps_uploader=lambda _local, name: f"/{name}",
-        state_fetcher=lambda: {},
+        # An explicit, complete AMS snapshot with zero units proves this
+        # printer really is using an external spool.  A missing snapshot is
+        # ambiguous and must fail closed instead (next test).
+        state_fetcher=lambda: {"ams": {"ams": []}},
         mqtt_publisher=lambda payload, _wait: (published.append(payload) or {"ok": True}),
     )
 
@@ -260,7 +315,7 @@ def test_single_color_send_allows_external_spool_when_no_ams(tmp_path):
     assert published[0]["print"]["ams_mapping"] == [0]
 
 
-def test_single_color_send_allows_external_spool_when_ams_read_fails(tmp_path):
+def test_single_color_send_refuses_external_spool_guess_when_ams_read_fails(tmp_path):
     job = tmp_path / "single.gcode.3mf"
     _make_single_color_3mf(str(job))
     published = []
@@ -277,10 +332,73 @@ def test_single_color_send_allows_external_spool_when_ams_read_fails(tmp_path):
         mqtt_publisher=lambda payload, _wait: (published.append(payload) or {"ok": True}),
     )
 
-    adapter.send(str(job), start=True)
+    try:
+        adapter.send(str(job), start=True)
+        assert False, "expected fail-closed AMS read"
+    except RuntimeError as exc:
+        assert "refusing to guess external spool" in str(exc)
+    assert published == []
 
-    assert published[0]["print"]["use_ams"] is False
-    assert published[0]["print"]["ams_mapping"] == [0]
+
+def test_fetch_print_state_waits_for_requested_ams_snapshot(monkeypatch):
+    trays = {
+        "ams": [{
+            "id": "0",
+            "tray": [{"id": "0", "tray_color": "A4AAACFF", "tray_type": "PLA"}],
+        }]
+    }
+
+    class Message:
+        def __init__(self, payload):
+            self.payload = payload.encode()
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            self.on_connect = None
+            self.on_message = None
+
+        def username_pw_set(self, *_args):
+            pass
+
+        def tls_set_context(self, *_args):
+            pass
+
+        def connect(self, *_args, **_kwargs):
+            self.on_connect(self, None, None, 0)
+
+        def subscribe(self, *_args):
+            pass
+
+        def publish(self, *_args):
+            pass
+
+        def loop_start(self):
+            self.on_message(self, None, Message('{"print":{"gcode_state":"IDLE"}}'))
+            self.on_message(self, None, Message('{"print":{"ams":{}}}'))
+            self.on_message(
+                self, None, Message('{"print":{"ams":' + __import__("json").dumps(trays) + '}}')
+            )
+
+        def loop_stop(self):
+            pass
+
+        def disconnect(self):
+            pass
+
+    fake_mqtt = type(
+        "FakeMQTT",
+        (),
+        {
+            "Client": FakeClient,
+            "CallbackAPIVersion": type("CallbackAPIVersion", (), {"VERSION2": 2}),
+        },
+    )
+    monkeypatch.setattr("forge.adapters.bambu.mqtt", fake_mqtt)
+
+    state = BambuAdapter("h", "access", "serial")._fetch_print_state(required_field="ams")
+
+    assert state["gcode_state"] == "IDLE"
+    assert state["ams"] == trays
 
 
 def test_tool_colors_reads_from_3mf(tmp_path):

@@ -139,3 +139,50 @@ def test_drain_vetoes_without_bed_confirmed(tmp_path):
     drained = d.drain()
     assert drained[0]["state"] == "vetoed"
     assert ad5x.sent == []
+
+
+def test_retry_active_resends_only_interrupted_job(tmp_path):
+    ad5x = FakeAdapter("idle")
+    d, q = _dispatcher(tmp_path, ad5x)
+    first = d.submit(_write_gcode(tmp_path))
+
+    retried = d.retry_active("ad5x")
+
+    assert first["state"] == "printing"
+    assert retried["state"] == "printing"
+    assert retried["job_id"] == first["job_id"]
+    assert len(ad5x.sent) == 2
+    assert q.active("ad5x")["id"] == first["job_id"]
+
+
+def test_retry_active_refuses_busy_printer(tmp_path):
+    ad5x = FakeAdapter("idle")
+    d, _ = _dispatcher(tmp_path, ad5x)
+    d.submit(_write_gcode(tmp_path))
+    ad5x._status = "printing"
+
+    retried = d.retry_active("ad5x")
+
+    assert retried["state"] == "busy"
+    assert len(ad5x.sent) == 1
+
+
+def test_retry_active_rechecks_guardian(tmp_path):
+    from forge.guardian import Guardian
+
+    ad5x = FakeAdapter("idle")
+    q = JobQueue(str(tmp_path / "state.json"))
+    gpath = _write_gcode(tmp_path)
+    job = {
+        "id": "interrupted", "name": "job.gcode", "printer": "ad5x",
+        "path": gpath, "material": "PLA", "colors": 1,
+        "bed_confirmed_clear": False,
+    }
+    q.enqueue("ad5x", job)
+    q.start_next("ad5x")
+    d = Dispatcher(adapters={"ad5x": ad5x}, queue=q, guardian=Guardian())
+
+    retried = d.retry_active("ad5x")
+
+    assert retried["state"] == "vetoed"
+    assert ad5x.sent == []

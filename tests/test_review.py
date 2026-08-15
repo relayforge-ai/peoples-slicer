@@ -33,3 +33,20 @@ def test_flex_on_bambu_warns_wrong_route():
     route = next(f for f in findings if f.param == "material_route")
     assert route.severity == "warn"
     assert "AD5X" in route.message
+
+
+def test_multicolor_review_blocks_when_prime_tower_disabled(tmp_path):
+    path = tmp_path / "unsafe.gcode"
+    path.write_text(
+        "; printer_model = Flashforge AD5X\n"
+        "; filament_type = PLA;PLA\n"
+        "; filament_colour = #FF0000;#00FF00\n"
+        "; enable_prime_tower = 0\n"
+    )
+
+    report = review_file(str(path))
+
+    tower = next(f for f in report["findings"] if f["param"] == "enable_prime_tower")
+    assert tower["severity"] == "warn"
+    assert report["prime_tower_enabled"] is False
+    assert report["blocking"] is True
