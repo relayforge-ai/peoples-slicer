@@ -43,6 +43,7 @@ def test_classify_file_scans_huge_gcode_when_config_sits_in_the_middle_gap(tmp_p
         "; printer_settings_id = Bambu Lab P1S 0.4 nozzle",
         "; filament_type = PLA;PLA;PLA",
         "; filament_colour = #AE835B;#000000;#FFFFFF",
+        "; enable_prime_tower = 1",
         "; CONFIG_BLOCK_END",
     ]
     p = tmp_path / "huge.gcode"
@@ -50,3 +51,4 @@ def test_classify_file_scans_huge_gcode_when_config_sits_in_the_middle_gap(tmp_p
     info = classify_file(str(p))
     assert info.printer == "bambu_a2l"
     assert info.colors == 3
+    assert info.prime_tower_enabled is True

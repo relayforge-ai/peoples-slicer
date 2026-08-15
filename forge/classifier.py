@@ -23,6 +23,9 @@ class JobInfo:
             (e.g. ``"PLA"``, ``"TPU"``); ``""`` when the header omits it.
         colors: Number of distinct filaments/colors in the slice (``1`` for a
             single-material job).
+        prime_tower_enabled: ``True`` only when the slice explicitly records
+            ``enable_prime_tower = 1``; ``False`` when explicitly disabled and
+            ``None`` when the setting is absent or unparseable.
         est_seconds: Estimated print time in whole seconds, or ``None`` when the
             header carries no parseable time estimate.
         est_grams: Estimated filament mass in grams, or ``None`` when the header
@@ -33,6 +36,7 @@ class JobInfo:
     printer_model: str = ""
     material: str = ""
     colors: int = 1
+    prime_tower_enabled: bool | None = None
     est_seconds: int | None = None
     est_grams: float | None = None
 
@@ -40,6 +44,9 @@ class JobInfo:
 # Substring (lowercased) -> internal printer key. More-specific needles first.
 _PRINTER_MAP: list[tuple[str, str]] = [
     ("flashforge ad5x", "ad5x"),
+    ("anycubic kobra 3 max", "kobra3max"),
+    ("kobra 3 max", "kobra3max"),
+    ("kobra3max", "kobra3max"),
     ("bambu lab a2l", "bambu_a2l"),
     ("bambu lab p1s", "bambu_a2l"),
     ("p1s", "bambu_a2l"),
@@ -78,6 +85,18 @@ def _colors(header: str) -> int:
     if used:
         return len([c for c in used.split(",") if c.strip()])
     return 1
+
+
+def _prime_tower_enabled(header: str) -> bool | None:
+    raw = _header_value(header, "enable_prime_tower")
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return None
 
 
 def _est_seconds(header: str) -> int | None:
@@ -135,6 +154,7 @@ def classify(header: str) -> JobInfo:
         printer_model=model or settings_id,
         material=_material(header),
         colors=_colors(header),
+        prime_tower_enabled=_prime_tower_enabled(header),
         est_seconds=_est_seconds(header),
         est_grams=_est_grams(header),
     )

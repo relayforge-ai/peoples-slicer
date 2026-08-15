@@ -199,22 +199,38 @@ def review_file(path: str, printer: str | None = None) -> dict:
     - ``material`` / ``colors`` — echoed straight from classification.
     - ``findings`` — a list of ``Finding`` dicts (``param``, ``value``,
       ``severity`` one of ``ok`` / ``warn`` / ``suggest``, ``message``).
-    - ``blocking`` — ``True`` only when a flexible material is routed to the
-      wrong printer (a ``material_route`` warning). This is the sole condition
-      that makes ``forge review`` exit non-zero; every other finding, including
-      an out-of-range nozzle temp, is advisory and leaves ``blocking`` ``False``.
+    - ``blocking`` — ``True`` when flexible material is routed to the wrong
+      printer or a multicolor artifact lacks a verified prime tower. These
+      safety findings make ``forge review`` exit non-zero; parameter suggestions
+      such as nozzle temperature remain advisory.
     """
     info = classify_file(path)
     target = printer or info.printer
     meta = read_gcode_meta(path)
     params = parse_config_params(meta)
     findings = review_params(params, target, info.material)
+    if info.colors > 1:
+        tower_ok = info.prime_tower_enabled is True
+        findings.append(Finding(
+            "enable_prime_tower",
+            info.prime_tower_enabled,
+            "ok" if tower_ok else "warn",
+            (
+                "prime tower enabled for multicolor print"
+                if tower_ok
+                else "multicolor print is blocked until enable_prime_tower = 1"
+            ),
+        ))
     return {
         "file": path,
         "printer": target,
         "classified_printer": info.printer,
         "material": info.material,
         "colors": info.colors,
+        "prime_tower_enabled": info.prime_tower_enabled,
         "findings": [asdict(f) for f in findings],
-        "blocking": any(f.severity == "warn" and f.param == "material_route" for f in findings),
+        "blocking": any(
+            f.severity == "warn" and f.param in {"material_route", "enable_prime_tower"}
+            for f in findings
+        ),
     }

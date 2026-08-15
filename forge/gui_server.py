@@ -272,6 +272,7 @@ def _api_send(body: dict[str, Any], config_path: str | None) -> tuple[int, bytes
                     "printer": info.printer,
                     "material": info.material,
                     "colors": info.colors,
+                    "prime_tower_enabled": info.prime_tower_enabled,
                     "est_seconds": info.est_seconds,
                     "est_grams": info.est_grams,
                     "path": str(p),

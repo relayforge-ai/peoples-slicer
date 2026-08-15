@@ -43,7 +43,10 @@ class Guardian:
         # False all veto — a physical safety gate must never proceed on an unconfirmed default.
         if job.get("bed_confirmed_clear") is not True:
             return False, "bed not confirmed clear"
-        if job.get("colors", 1) > 4:
+        colors = job.get("colors", 1)
+        if colors > 1 and job.get("prime_tower_enabled") is not True:
+            return False, "multicolor print requires verified enable_prime_tower = 1"
+        if colors > 4:
             return False, "more than 4 colors — AD5X IFS limit"
         material = (job.get("material") or "").lower()
         printer = job.get("printer")

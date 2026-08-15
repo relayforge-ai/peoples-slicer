@@ -23,6 +23,7 @@ _CLASSIFY_PREFIXES = (
     b"; printer_settings_id =",
     b"; filament_type =",
     b"; filament_colour =",
+    b"; enable_prime_tower =",
     b"; estimated printing time (normal mode)",
     b"; total filament used [g]",
 )
@@ -96,16 +97,25 @@ def classify_file(path: str) -> JobInfo:
     the classifier-relevant header lines and re-classifies with those appended
     (reusing the already-unzipped ``.3mf`` bytes rather than re-reading).
 
-    The fallback never downgrades a successful match: it runs only when the first
-    pass left the printer unresolved. Raises :class:`ValueError` (via
-    :func:`_full_gcode_bytes`) on a corrupt/incomplete ``.3mf`` archive.
+    The focused full scan runs when the first pass leaves the printer unresolved
+    or cannot prove palette/prime-tower custody. Raises :class:`ValueError`
+    (via :func:`_full_gcode_bytes`) on a corrupt/incomplete ``.3mf`` archive.
     """
     name = Path(path).name
     is_3mf = Path(path).suffix == ".3mf" or name.endswith(".gcode.3mf")
     raw = _full_gcode_bytes(path) if is_3mf else _head_tail_plain(path)
     meta = _meta_from_raw(raw)
     info = classify(meta)
-    if info.printer is None:
+    # Prime-tower custody is a send gate for every multicolor printer.  A
+    # Bambu/Orca CONFIG block can sit outside the cheap head+tail window, so a
+    # missing palette or tower setting must trigger the focused full scan even
+    # when printer_model was already resolved.
+    needs_full_scan = (
+        info.printer is None
+        or "filament_colour" not in meta
+        or info.prime_tower_enabled is None
+    )
+    if needs_full_scan:
         full = raw if is_3mf else _full_gcode_bytes(path)
         extra = _scan_classify_lines(full)
         if extra:

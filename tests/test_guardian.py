@@ -49,3 +49,32 @@ def test_flex_vetoed_on_ender():
     ok, reason = g.approve({"path": "/x.gcode", "bed_confirmed_clear": True, "material": "TPU", "printer": "ender"})
     assert not ok
     assert "AD5X" in reason
+
+
+def test_multicolor_without_prime_tower_is_vetoed_for_every_printer():
+    g = Guardian()
+    for printer in ("ad5x", "bambu", "kobra3max", "ender"):
+        ok, reason = g.approve({
+            "path": "/x.gcode",
+            "bed_confirmed_clear": True,
+            "material": "PLA",
+            "printer": printer,
+            "colors": 2,
+            "prime_tower_enabled": False,
+        })
+        assert not ok, printer
+        assert "prime_tower" in reason
+
+
+def test_multicolor_with_verified_prime_tower_passes_tower_gate():
+    g = Guardian()
+    ok, reason = g.approve({
+        "path": "/x.gcode",
+        "bed_confirmed_clear": True,
+        "material": "PLA",
+        "printer": "ad5x",
+        "colors": 4,
+        "prime_tower_enabled": True,
+    })
+    assert ok
+    assert reason == "ok"

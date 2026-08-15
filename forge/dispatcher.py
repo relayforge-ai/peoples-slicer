@@ -105,6 +105,7 @@ class Dispatcher:
         job = {
             "id": job_id, "name": name, "printer": printer, "path": path,
             "material": info.material, "colors": info.colors,
+            "prime_tower_enabled": getattr(info, "prime_tower_enabled", None),
             "est_seconds": info.est_seconds, "est_grams": info.est_grams,
             **extra,
         }
@@ -142,6 +143,47 @@ class Dispatcher:
                 {**job, "job_id": job["id"], "state": "failed", "reason": str(exc)}
             )
         return self._emit({**job, "job_id": job["id"], "state": "printing"})
+
+    def retry_active(self, printer: str) -> dict:
+        """Re-send an interrupted active job after the printer returns idle.
+
+        A production stop can leave the durable queue's exact job marked active
+        while the hardware is idle.  ``submit`` deliberately de-duplicates that
+        file and ``drain`` interprets idle-active as completed, so neither is a
+        safe retry operation.  This explicit path preserves the active identity,
+        re-runs the guardian against the persisted safety facts, refuses a busy
+        printer, and sends only that already-active job.
+        """
+        adapter_key = self._adapter_key(printer)
+        if not adapter_key:
+            return self._emit(
+                {"state": "quarantined", "printer": printer,
+                 "reason": "unknown_printer"}
+            )
+
+        job = self.queue.active(adapter_key)
+        if job is None:
+            return self._emit(
+                {"state": "no_active", "printer": adapter_key,
+                 "reason": "no interrupted active job"}
+            )
+
+        adapter = self.adapters[adapter_key]
+        status = adapter.status()
+        if status != "idle":
+            return self._emit(
+                {**job, "job_id": job["id"], "state": "busy",
+                 "reason": f"printer status is {status}"}
+            )
+
+        if self.guardian is not None:
+            approved, reason = self.guardian.approve(job)
+            if not approved:
+                return self._emit(
+                    {**job, "job_id": job["id"], "state": "vetoed", "reason": reason}
+                )
+
+        return self._send_job(adapter_key, adapter, job)
 
     def drain(self) -> list[dict]:
         """Start the next queued job on any printer that just went idle."""

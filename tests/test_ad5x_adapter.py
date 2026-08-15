@@ -31,3 +31,33 @@ def test_status_uses_injected_detail_fetcher():
 
     adapter = AD5XAdapter("printer.local", "SERIAL", "CHECK", detail_fetcher=fetcher)
     assert adapter.status() == "idle"
+
+
+def test_list_files_joins_names_to_slice_metadata():
+    posted = []
+
+    def post(path, body):
+        posted.append((path, body))
+        return {
+            "gcodeList": ["ready.3mf", "raw-project.3mf"],
+            "gcodeListDetail": [{
+                "gcodeFileName": "ready.3mf",
+                "gcodeToolCnt": 2,
+                "printingTime": 3600,
+                "totalFilamentWeight": 42.5,
+            }],
+        }
+
+    adapter = AD5XAdapter("printer.local", "SERIAL", "CHECK", api_poster=post)
+
+    assert adapter.list_files() == [
+        {
+            "name": "ready.3mf",
+            "gcodeFileName": "ready.3mf",
+            "gcodeToolCnt": 2,
+            "printingTime": 3600,
+            "totalFilamentWeight": 42.5,
+        },
+        {"name": "raw-project.3mf"},
+    ]
+    assert posted == [("/gcodeList", {"serialNumber": "SERIAL", "checkCode": "CHECK"})]
