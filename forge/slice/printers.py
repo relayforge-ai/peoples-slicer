@@ -73,13 +73,16 @@ PRINTERS: dict[str, PrinterSpec] = {
 }
 
 # Aliases so agents / Jules don't trip on naming.
+# Classifier emits bambu_a1mini / bambu_a2l; the slice table uses a1mini / a2l.
 ALIASES = {
     "a1_mini": "a1mini",
     "a1-mini": "a1mini",
     "a1m": "a1mini",
     "bambu_a1_mini": "a1mini",
+    "bambu_a1mini": "a1mini",
     "p1s": "a2l",
     "bambu_p1s": "a2l",
+    "bambu_a2l": "a2l",
     "flashforge": "ad5x",
     "flashforge_ad5x": "ad5x",
     "ender3": "ender",

@@ -57,6 +57,44 @@ class JobQueue:
             self._state = loaded
         self._state.setdefault("pending", {})
         self._state.setdefault("active", {})
+        self.dropped_ghosts: list[dict] = self._drop_missing_paths()
+
+    def _job_path_missing(self, job: dict | None) -> bool:
+        if not job or not isinstance(job, dict):
+            return False
+        path = job.get("path")
+        if not path:
+            return False
+        return not os.path.isfile(path)
+
+    def _drop_missing_paths(self) -> list[dict]:
+        """Drop queued jobs whose file was deleted (dead /tmp scratchpads).
+
+        REL-602: ``~/.forge_queue.json`` inherited three jobs pointing at a
+        deleted session scratchpad and blocked dispatch. Missing path = ghost.
+        Jobs without a ``path`` key are left alone (tests / metadata-only).
+        """
+        dropped: list[dict] = []
+        pending = self._state.get("pending") or {}
+        dirty = False
+        for printer, jobs in list(pending.items()):
+            kept = []
+            for job in jobs or []:
+                if self._job_path_missing(job):
+                    dropped.append({**job, "printer": printer, "reason": "path_missing"})
+                    dirty = True
+                else:
+                    kept.append(job)
+            pending[printer] = kept
+        active = self._state.get("active") or {}
+        for printer, job in list(active.items()):
+            if self._job_path_missing(job):
+                dropped.append({**(job or {}), "printer": printer, "reason": "path_missing"})
+                active[printer] = None
+                dirty = True
+        if dirty:
+            self._save()
+        return dropped
 
     def _save(self) -> None:
         tmp = self.state_path + ".tmp"

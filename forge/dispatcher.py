@@ -11,9 +11,19 @@ from .jobqueue import JobQueue
 from .reader import classify_file
 
 # Classifier may return specific Bambu keys before both printers are wired in config.
+# Slice table uses a1mini / a2l; send config often uses a single "bambu" adapter.
 _PRINTER_ALIASES: dict[str, str] = {
     "bambu_a2l": "bambu",
     "bambu_a1mini": "bambu",
+    "a1mini": "bambu",
+    "a2l": "bambu",
+    "a1_mini": "bambu",
+    "a1-mini": "bambu",
+}
+_SLICE_KEYS: dict[str, str] = {
+    "bambu_a1mini": "a1mini",
+    "bambu_a2l": "a2l",
+    "bambu": "a2l",
 }
 
 
@@ -64,6 +74,9 @@ class Dispatcher:
             return None
         if printer in self.adapters:
             return printer
+        slice_key = _SLICE_KEYS.get(printer)
+        if slice_key and slice_key in self.adapters:
+            return slice_key
         alias = _PRINTER_ALIASES.get(printer)
         if alias and alias in self.adapters:
             return alias
