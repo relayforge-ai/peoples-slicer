@@ -51,7 +51,9 @@ def test_slice_batch_dry_run(tmp_path):
     models = [str(tmp_path / f"m{i}.stl") for i in range(3)]
     for m in models:
         Path(m).write_text("solid x\nendsolid x\n")
-    r = slice_batch(models, dry_run=True)
+    out_dir = tmp_path / "must-not-be-created"
+    r = slice_batch(models, dry_run=True, out_dir=out_dir)
     assert r.printer == "a1mini"
     assert len(r.plates) == 3
     assert all(p["status"] == "planned" for p in r.plates)
+    assert not out_dir.exists()

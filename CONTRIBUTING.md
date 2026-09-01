@@ -12,7 +12,7 @@ git clone https://github.com/relayforge-ai/peoples-slicer && cd peoples-slicer
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 pip install pytest
-pytest -q          # 98 tests should pass before you change anything
+pytest -q          # all tests should pass before you change anything
 ```
 
 No printer required to develop — the test suite uses fixtures/mock adapters (`tests/`, `forge/fixtures.py`).

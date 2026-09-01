@@ -45,12 +45,13 @@
     const d = await r.json();
     state.printers = d.printers || [];
     const sel = $("printer");
-    sel.innerHTML = state.printers
-      .map(
-        (p) =>
-          `<option value="${p.key}">${p.display_name} · ${p.bed_xy_mm}×${p.bed_z_mm} mm · ${p.backend}</option>`
-      )
-      .join("");
+    const options = state.printers.map((p) => {
+      const option = document.createElement("option");
+      option.value = String(p.key || "");
+      option.textContent = `${p.display_name} · ${p.bed_xy_mm}×${p.bed_z_mm} mm · ${p.backend}`;
+      return option;
+    });
+    sel.replaceChildren(...options);
   }
 
   async function loadCheat() {
