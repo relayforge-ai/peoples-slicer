@@ -86,6 +86,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     slice_p.add_argument("--plan-only", action="store_true", help="print plate policy JSON and exit")
     slice_p.add_argument("--timeout", type=int, default=900)
+    slice_p.add_argument(
+        "--magnet-style",
+        default="glue-in",
+        choices=("glue-in", "glue_in", "captured", "captive"),
+        help="magnet 3mf plate: glue-in/non-captured (default) or captured (explicit)",
+    )
+    slice_p.add_argument(
+        "--plate",
+        type=int,
+        default=None,
+        help="explicit 1-based plate index (overrides magnet default)",
+    )
+    slice_p.add_argument(
+        "--extra-model",
+        action="append",
+        dest="extra_models",
+        help="additional model on the same plate (max 2, similar heights; not magnet plates)",
+    )
 
     ss_p = sub.add_parser(
         "slice-send",
@@ -97,6 +115,13 @@ def build_parser() -> argparse.ArgumentParser:
     ss_p.add_argument("--auto-refit", action="store_true")
     ss_p.add_argument("--goal", choices=("single", "photo_line", "max_parts", "estimate"))
     ss_p.add_argument("--timeout", type=int, default=900)
+    ss_p.add_argument(
+        "--magnet-style",
+        default="glue-in",
+        choices=("glue-in", "glue_in", "captured", "captive"),
+    )
+    ss_p.add_argument("--plate", type=int, default=None)
+    ss_p.add_argument("--extra-model", action="append", dest="extra_models")
     ss_p.add_argument("--dry-run", action="store_true", help="slice + classify only, do not send")
     ss_p.add_argument(
         "--bed-confirmed",
@@ -348,8 +373,19 @@ def cmd_slice(args, config_path: str | None) -> int:
     from .slice.printers import get_printer
 
     if args.plan_only:
-        policy = plan_plate(args.model, args.printer, goal=args.goal or "single")
-        refit = refit_scale(args.model, args.printer)
+        try:
+            policy = plan_plate(
+                args.model,
+                args.printer,
+                goal=args.goal or "single",
+                extra_models=getattr(args, "extra_models", None),
+                magnet_style=args.magnet_style,
+                plate=args.plate,
+            )
+            refit = refit_scale(args.model, args.printer)
+        except (FileNotFoundError, KeyError, ValueError) as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
         print(json.dumps({
             "refit": {
                 "scale": refit.scale,
@@ -370,11 +406,14 @@ def cmd_slice(args, config_path: str | None) -> int:
             dry_run=args.dry_run,
             auto_refit=args.auto_refit or (args.goal is not None),
             goal=args.goal,
+            extra_models=getattr(args, "extra_models", None),
+            magnet_style=args.magnet_style,
+            plate=args.plate,
         )
     except FitError as e:
         print(f"FIT: {e}", file=sys.stderr)
         return 3
-    except (SliceError, FileNotFoundError, KeyError) as e:
+    except (SliceError, FileNotFoundError, KeyError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
@@ -389,6 +428,8 @@ def cmd_slice(args, config_path: str | None) -> int:
         "repetitions": result.repetitions,
         "policy": result.policy,
         "detail": result.detail,
+        "slice_plate": result.slice_plate,
+        "plate_label": result.plate_label,
     }, indent=2))
     return 0
 
@@ -407,6 +448,9 @@ def cmd_slice_send(args, config_path: str | None) -> int:
             dry_run=False,
             auto_refit=args.auto_refit or (args.goal is not None),
             goal=args.goal,
+            extra_models=getattr(args, "extra_models", None),
+            magnet_style=getattr(args, "magnet_style", "glue_in"),
+            plate=getattr(args, "plate", None),
         )
     except FitError as e:
         print(f"FIT: {e}", file=sys.stderr)

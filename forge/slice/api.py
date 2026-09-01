@@ -2,19 +2,24 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .artifact import ArtifactError, assert_sliced_artifact
 from .backends import build_backend_cmd, run_backend
 from .fit import FitError, assert_fits
+from .magnet_plates import MagnetPlateError, MagnetStyle, select_magnet_plate
+from .plate_policy import Goal, PlatePolicy, cap_same_plate_models, plan_plate
 from .printers import PrinterSpec, get_printer
 from .profile_resolve import printable_xy_mm
-from .plate_policy import Goal, PlatePolicy, plan_plate
+from .profile_validate import ProfileError
 from .refit import RefitPlan, refit_scale
 
 
@@ -38,6 +43,8 @@ class SliceResult:
     refit_note: str = ""
     repetitions: int = 1
     policy: dict | None = None
+    slice_plate: int = 1
+    plate_label: str = ""
 
 
 def _estimates_from_3mf(path: Path) -> dict[str, Any]:
@@ -101,6 +108,9 @@ def slice_for(
     scale: float | None = None,
     goal: Goal | None = None,
     repetitions: int | None = None,
+    extra_models: Sequence[str | Path] | None = None,
+    magnet_style: str | MagnetStyle = "glue_in",
+    plate: int | None = None,
 ) -> SliceResult:
     """Slice ``model`` for ``printer`` (a1mini | a2l | ad5x | ender).
 
@@ -117,10 +127,39 @@ def slice_for(
 
     spec = printer if isinstance(printer, PrinterSpec) else get_printer(str(printer))
 
+    try:
+        magnet = select_magnet_plate(
+            model_path, style=magnet_style, plate_override=plate
+        )
+    except MagnetPlateError as exc:
+        raise SliceError(str(exc)) from exc
+    slice_plate = magnet.slice_plate
+
+    extra_list: list[Path] = []
+    if extra_models and magnet.is_magnet_project:
+        extra_list = []
+    elif extra_models:
+        kept, _cap_notes = cap_same_plate_models(
+            [model_path, *[Path(m).expanduser().resolve() for m in extra_models]]
+        )
+        extra_list = [p for p in kept[1:] if p.is_file()]
+        missing = [m for m in extra_models if not Path(m).expanduser().resolve().is_file()]
+        if missing:
+            raise FileNotFoundError(f"extra model(s) not found: {missing}")
+
     policy: PlatePolicy | None = None
     if goal is not None:
-        policy = plan_plate(model_path, spec, goal=goal)
+        policy = plan_plate(
+            model_path,
+            spec,
+            goal=goal,
+            extra_models=list(extra_models) if extra_models else None,
+            magnet_style=magnet_style,
+            plate=plate,
+        )
         auto_refit = auto_refit or policy.auto_refit
+        slice_plate = policy.slice_plate
+        extra_list = [Path(p) for p in policy.extra_models]
 
     refit_plan: RefitPlan | None = None
     applied_scale = 1.0
@@ -174,12 +213,15 @@ def slice_for(
     profile_dir = Path(tempfile.mkdtemp(prefix=f"mslice-{spec.key}-"))
     try:
         cmd = build_backend_cmd(
-            spec, model_path, output_path,
+            spec,
+            [model_path, *extra_list],
+            output_path,
             profile_dir=profile_dir,
             scale=applied_scale,
             repetitions=applied_reps,
             arrange=arrange,
             orient=orient,
+            slice_plate=slice_plate,
         )
 
         # Fail-closed machine profile check (REL-631 / zero parameter loss).
@@ -210,6 +252,13 @@ def slice_for(
             )
 
 
+        process_flat: dict[str, Any] = {}
+        if cmd.flattened_process and Path(cmd.flattened_process).is_file():
+            try:
+                process_flat = json.loads(Path(cmd.flattened_process).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                process_flat = {}
+
         if dry_run:
             return SliceResult(
                 ok=True,
@@ -218,6 +267,15 @@ def slice_for(
                 output=str(output_path),
                 backend=spec.backend,
                 bounds=bounds_info,
+                estimates={
+                    "printer_model": flat.get("printer_model") or flat.get("name"),
+                    "printable_area": flat.get("printable_area"),
+                    "printable_height": flat.get("printable_height"),
+                    "enable_prime_tower": process_flat.get("enable_prime_tower"),
+                    "wipe_tower_x": process_flat.get("wipe_tower_x"),
+                    "wipe_tower_y": process_flat.get("wipe_tower_y"),
+                    "colors": getattr(cmd, "color_count", 1),
+                },
                 flattened_machine=str(cmd.flattened_machine) if cmd.flattened_machine else None,
                 detail="dry_run",
                 cmd=cmd.argv,
@@ -225,6 +283,8 @@ def slice_for(
                 refit_note=(refit_plan.note if refit_plan else (policy.notes[0] if policy and policy.notes else "")),
                 repetitions=applied_reps,
                 policy=policy.as_dict() if policy else None,
+                slice_plate=slice_plate,
+                plate_label=magnet.plate_name,
             )
 
         # Clean stale output so we never treat a previous file as success.
@@ -255,6 +315,16 @@ def slice_for(
         elif output_path.suffix == ".gcode":
             estimates = _estimates_from_gcode(output_path)
 
+        try:
+            assert_sliced_artifact(output_path, spec.key)
+        except ArtifactError as exc:
+            msg = str(exc)
+            if msg.startswith("REL-602"):
+                raise SliceError(msg) from exc
+            raise SliceError(
+                f"slice wrote an artifact that does not match {spec.key}: {exc}"
+            ) from exc
+
         return SliceResult(
             ok=True,
             printer=spec.key,
@@ -270,9 +340,12 @@ def slice_for(
             refit_note=(refit_plan.note if refit_plan else (policy.notes[0] if policy and policy.notes else "")),
             repetitions=applied_reps,
             policy=policy.as_dict() if policy else None,
+            slice_plate=slice_plate,
+            plate_label=magnet.plate_name,
         )
+    except (ProfileError, MagnetPlateError) as exc:
+        raise SliceError(str(exc)) from exc
     finally:
         # Keep profile dir when MULTI_SLICER_KEEP_PROFILES=1 for debugging.
-        import os
         if os.environ.get("MULTI_SLICER_KEEP_PROFILES") != "1":
             shutil.rmtree(profile_dir, ignore_errors=True)

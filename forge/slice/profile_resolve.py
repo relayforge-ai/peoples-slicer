@@ -17,33 +17,115 @@ import os
 from pathlib import Path
 from typing import Any
 
-# Default locations (override with env for CI / alternate installs).
+from .profile_validate import ensure_process_line_widths, validate_flattened_profile
+
+# Persistent locations only. `/tmp` extracts die on reboot (REL-602 #3 —
+# A1 mini symlink into /tmp/bambustudio-extract, every slice returned -5).
 _PKG = Path(__file__).resolve().parent
-_DEFAULT_BAMBU_CANDIDATES = [
-    Path(os.environ.get("BAMBU_PROFILES", "")) if os.environ.get("BAMBU_PROFILES") else None,
-    Path.home() / "print_work" / "multi_slicer" / "vendor_profiles" / "BBL",
-    Path("/tmp/bambustudio-extract/squashfs-root/resources/profiles/BBL"),
-]
-_DEFAULT_BAMBU_CANDIDATES = [p for p in _DEFAULT_BAMBU_CANDIDATES if p is not None]
+_EPHEMERAL_ROOTS = ("/tmp", "/var/tmp")
 
 
-def _default_bambu_profiles() -> Path:
+def _is_ephemeral(path: Path) -> bool:
+    """True for /tmp and /var/tmp trees — they do not survive a reboot."""
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        resolved = path.expanduser()
+    text = str(resolved)
+    return any(text == root or text.startswith(root + "/") for root in _EPHEMERAL_ROOTS)
+
+
+def _profile_tree_ok(path: Path) -> bool:
+    if _is_ephemeral(path):
+        return False
+    if not path.exists() or not path.is_dir():
+        return False
+    try:
+        return next(path.rglob("*.json"), None) is not None
+    except OSError:
+        return False
+
+
+def _persistent_bambu_candidates() -> list[Path]:
+    """Load-bearing BBL roots. Never includes /tmp."""
+    env = os.environ.get("BAMBU_PROFILES")
+    out: list[Path] = []
+    if env:
+        out.append(Path(env).expanduser())
+    out.extend(
+        [
+            _PKG / "vendor_profiles" / "BBL",
+            Path.home() / ".forge" / "vendor_profiles" / "BBL",
+            Path.home() / "print_work" / "multi_slicer" / "vendor_profiles" / "BBL",
+        ]
+    )
+    return out
+
+
+def _default_bambu_profiles(*, require: bool = False) -> Path:
+    """Resolve a persistent BBL tree.
+
+    When ``require`` is True (slice / flatten), a missing or `/tmp` tree raises
+    instead of returning a path we just proved absent — that silent-wrong path
+    is how every A1 mini slice broke after the Dawes reboot.
+    """
+    candidates = _persistent_bambu_candidates()
     env = os.environ.get("BAMBU_PROFILES")
     if env:
-        return Path(env)
-    for c in _DEFAULT_BAMBU_CANDIDATES:
-        if c.exists():
+        chosen = Path(env).expanduser()
+        if _is_ephemeral(chosen):
+            raise FileNotFoundError(
+                f"BAMBU_PROFILES={chosen} is under /tmp and will vanish on reboot "
+                f"(REL-602). Copy the tree to ~/.forge/vendor_profiles/BBL and "
+                f"point BAMBU_PROFILES there."
+            )
+        if require and not _profile_tree_ok(chosen):
+            raise FileNotFoundError(
+                f"BAMBU_PROFILES={chosen} is missing or has no JSON profiles. "
+                f"Extract the BambuStudio AppImage to a persistent path "
+                f"(~/.forge/vendor_profiles/BBL), not /tmp."
+            )
+        return chosen
+    for c in candidates:
+        if _profile_tree_ok(c):
             return c
-    return _DEFAULT_BAMBU_CANDIDATES[0]
+    fallback = Path.home() / ".forge" / "vendor_profiles" / "BBL"
+    if require:
+        raise FileNotFoundError(
+            f"no persistent Bambu vendor profiles found. Looked at: "
+            f"{[str(c) for c in candidates]}. Extract BambuStudio with "
+            f"`AppImage --appimage-extract 'resources/profiles/BBL'` and copy "
+            f"that tree to {fallback} (never /tmp)."
+        )
+    return fallback
+
+
+def _default_orca_profiles(*, require: bool = False) -> Path:
+    env = os.environ.get("ORCA_PROFILES")
+    chosen = Path(
+        env
+        or (
+            Path.home()
+            / "orcaslicer"
+            / "squashfs-root"
+            / "resources"
+            / "profiles"
+        )
+    ).expanduser()
+    if _is_ephemeral(chosen):
+        raise FileNotFoundError(
+            f"ORCA_PROFILES={chosen} is under /tmp and will vanish on reboot. "
+            f"Use a persistent extract (e.g. ~/orcaslicer/squashfs-root/resources/profiles)."
+        )
+    if require and env and not _profile_tree_ok(chosen):
+        raise FileNotFoundError(
+            f"ORCA_PROFILES={chosen} is missing or has no JSON profiles."
+        )
+    return chosen
 
 
 DEFAULT_BAMBU_PROFILES = _default_bambu_profiles()
-DEFAULT_ORCA_PROFILES = Path(
-    os.environ.get(
-        "ORCA_PROFILES",
-        str(Path.home() / "orcaslicer" / "squashfs-root" / "resources" / "profiles"),
-    )
-)
+DEFAULT_ORCA_PROFILES = _default_orca_profiles()
 DEFAULT_FOUNDRY_ORCA = Path(
     os.environ.get("FOUNDRY_ORCA_PROFILES", str(Path.home() / "orcaslicer" / "profiles"))
 )
@@ -171,17 +253,35 @@ class ProfileIndex:
 
 
 def bambu_index() -> ProfileIndex:
-    return ProfileIndex([DEFAULT_BAMBU_PROFILES])
+    # Resolve live so tests / env changes are not stuck with import-time /tmp.
+    return ProfileIndex([_default_bambu_profiles(require=True)])
 
 
 def orca_index() -> ProfileIndex:
     # Foundry overrides first so name lookups prefer studio profiles.
-    return ProfileIndex([DEFAULT_FOUNDRY_ORCA, DEFAULT_ORCA_PROFILES])
+    foundry = Path(
+        os.environ.get("FOUNDRY_ORCA_PROFILES", str(DEFAULT_FOUNDRY_ORCA))
+    ).expanduser()
+    return ProfileIndex([foundry, _default_orca_profiles()])
 
 
-def write_flattened(index: ProfileIndex, name: str, dest: Path) -> Path:
-    """Write a flattened profile JSON to dest and return the path."""
+def write_flattened(
+    index: ProfileIndex,
+    name: str,
+    dest: Path,
+    *,
+    role: str | None = None,
+) -> Path:
+    """Write a flattened profile JSON to dest and return the path.
+
+    When ``role`` is set (machine / process / filament), validate identity and
+    required keys *before* the C++ slicer sees a hollow file.
+    """
     data = index.flatten(name)
+    if role == "process":
+        data = ensure_process_line_widths(data)
+    if role in {"machine", "process", "filament"}:
+        validate_flattened_profile(data, role=role, requested=name)
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

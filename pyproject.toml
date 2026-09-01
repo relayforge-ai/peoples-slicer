@@ -34,3 +34,7 @@ include = ["forge*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "slow: live slicer binary + xvfb (skipped when AppImages are absent)",
+]
