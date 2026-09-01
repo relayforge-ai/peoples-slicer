@@ -1,6 +1,7 @@
 """Slicer backends: BambuStudio (a1mini, a2l) and OrcaSlicer (ad5x, ender)."""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -16,6 +17,7 @@ from .profile_resolve import (
     orca_index,
     write_flattened,
 )
+from .retarget import retarget_models
 
 
 def _bambu_bin() -> Path:
@@ -45,6 +47,7 @@ class BackendCmd:
     flattened_machine: Path | None = None
     flattened_process: Path | None = None
     flattened_filament: Path | None = None
+    color_count: int = 1
 
 
 def _as_model_list(model: Path | Sequence[Path]) -> list[Path]:
@@ -88,6 +91,13 @@ def build_backend_cmd(
         machine = write_flattened(idx, printer.machine_name, tmp / "machine.json", role="machine")
         process = write_flattened(idx, printer.process_name, tmp / "process.json", role="process")
         filament = write_flattened(idx, printer.filament_name, tmp / "filament.json", role="filament")
+        machine_data = json.loads(machine.read_text(encoding="utf-8"))
+        process_data = json.loads(process.read_text(encoding="utf-8"))
+        models, process_data, colors = retarget_models(
+            models, printer, dest_dir=tmp, machine=machine_data, process=process_data
+        )
+        process = tmp / "process.json"
+        process.write_text(json.dumps(process_data, indent=2) + "\n", encoding="utf-8")
         bs = _bambu_bin()
         plate = 1 if slice_plate is None else int(slice_plate)
         # BambuStudio: --slice N is 1-based plate index; load-settings = machine;process
@@ -112,6 +122,7 @@ def build_backend_cmd(
             flattened_machine=machine,
             flattened_process=process,
             flattened_filament=filament,
+            color_count=colors,
         )
 
     if printer.backend == "orca":
@@ -159,6 +170,13 @@ def build_backend_cmd(
             tmp / "filament.json",
             role="filament",
         )
+        machine_data = json.loads(Path(machine).read_text(encoding="utf-8"))
+        process_data = json.loads(Path(process).read_text(encoding="utf-8"))
+        models, process_data, colors = retarget_models(
+            models, printer, dest_dir=tmp, machine=machine_data, process=process_data
+        )
+        process = tmp / "process.json"
+        process.write_text(json.dumps(process_data, indent=2) + "\n", encoding="utf-8")
 
         root = _orca_root()
         binary = root / "bin" / "orca-slicer"
@@ -190,6 +208,7 @@ def build_backend_cmd(
             flattened_machine=machine,
             flattened_process=process,
             flattened_filament=filament,
+            color_count=colors,
         )
 
     raise ValueError(f"unsupported backend {printer.backend!r}")

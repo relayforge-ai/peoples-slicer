@@ -29,6 +29,13 @@ from .plate_cycler import (
 )
 from .plate_policy import MAX_SAME_PLATE_PARTS, PlatePolicy, cap_same_plate_models, plan_plate
 from .profile_validate import LINE_WIDTH_KEYS, ProfileError, validate_flattened_profile
+from .retarget import (
+    clamp_wipe_tower,
+    color_count_from_path,
+    retarget_models,
+    sanitize_project_3mf,
+    stamp_target_overrides,
+)
 from .plate_swap import PlateSwapNotConfigured, plate_swap_end_gcode
 from .printers import PRINTERS, PrinterSpec, get_printer
 from .profile_harvester import harvest_all, resolve_from_harvest, write_manifest
@@ -75,6 +82,11 @@ __all__ = [
     "record_fit_failure",
     "refit_scale",
     "resolve_from_harvest",
+    "retarget_models",
+    "sanitize_project_3mf",
+    "stamp_target_overrides",
+    "clamp_wipe_tower",
+    "color_count_from_path",
     "select_magnet_plate",
     "slice_batch",
     "slice_for",

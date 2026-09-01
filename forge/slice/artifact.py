@@ -15,6 +15,11 @@ from typing import Any
 
 from .printers import get_printer
 from .profile_resolve import printable_xy_mm
+from .retarget import (
+    color_count_from_settings,
+    prime_tower_enabled,
+    wipe_tower_inside_bed,
+)
 
 # Expected identity after a real slice (REL-599 / REL-602).
 EXPECTED_PRINTER_MODEL = {
@@ -94,6 +99,8 @@ def assert_sliced_artifact(path: str | Path, printer: str) -> dict[str, Any]:
 
         cfg["printer_model"] matches the studio machine
         cfg["printable_area"] XY matches the routing-table bed
+        multicolor requires enable_prime_tower = 1 (every printer)
+        wipe_tower_x/y stay inside the destination bed
     """
     path = Path(path)
     if not path.is_file() or path.stat().st_size <= 0:
@@ -101,6 +108,7 @@ def assert_sliced_artifact(path: str | Path, printer: str) -> dict[str, Any]:
 
     spec = get_printer(printer)
     cfg = read_project_settings(path)
+    _enrich_from_gcode_header(cfg, path)
     model = str(cfg.get("printer_model") or cfg.get("printer_settings_id") or "")
     expected = EXPECTED_PRINTER_MODEL[spec.key]
     if expected.lower() not in model.lower():
@@ -119,4 +127,38 @@ def assert_sliced_artifact(path: str | Path, printer: str) -> dict[str, Any]:
             f"{path.name} printable_area XY={xy} does not match {spec.key} "
             f"{spec.bed_xy_mm} mm bed — 256 mm gcode on the A1 mini is a toolhead crash"
         )
+
+    colors = color_count_from_settings(cfg)
+    if colors > 1 and prime_tower_enabled(cfg.get("enable_prime_tower")) is not True:
+        raise ArtifactError(
+            "REL-602 output validation failed: multicolor slice requires "
+            "enable_prime_tower = 1 on every printer — refusing artifact "
+            "and requesting a corrected/manual slice"
+        )
+    if colors > 1 and not wipe_tower_inside_bed(cfg, spec.bed_xy_mm):
+        raise ArtifactError(
+            f"REL-602 output validation failed: wipe_tower_x/y "
+            f"({cfg.get('wipe_tower_x')!r},{cfg.get('wipe_tower_y')!r}) "
+            f"is outside the {spec.bed_xy_mm:.0f} mm bed — refusing artifact"
+        )
     return cfg
+
+
+def _enrich_from_gcode_header(cfg: dict[str, Any], path: Path) -> None:
+    """Fill prime-tower / colour keys from plate gcode when project_settings omits them."""
+    if path.suffix.lower() != ".3mf" and not path.name.endswith(".gcode.3mf"):
+        return
+    try:
+        with zipfile.ZipFile(path) as zf:
+            gc_name = next((n for n in zf.namelist() if n.endswith("plate_1.gcode")), None)
+            if gc_name is None:
+                return
+            text = zf.read(gc_name).decode("utf-8", "replace")[:80_000]
+    except (OSError, zipfile.BadZipFile):
+        return
+    for key in ("enable_prime_tower", "filament_colour", "wipe_tower_x", "wipe_tower_y"):
+        if cfg.get(key) not in (None, ""):
+            continue
+        m = re.search(rf";\s*{re.escape(key)}\s*=\s*(.+)", text)
+        if m:
+            cfg[key] = m.group(1).strip()

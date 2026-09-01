@@ -95,16 +95,23 @@ def write_sliced_3mf(
     *,
     printer_model: str,
     printable_area: list[str],
+    extra_settings: dict | None = None,
+    gcode_extra: str = "",
 ) -> Path:
     settings = {
         "printer_model": printer_model,
         "printable_area": printable_area,
         "printable_height": "180",
     }
+    if extra_settings:
+        settings.update(extra_settings)
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("Metadata/project_settings.config", json.dumps(settings))
-        zf.writestr("Metadata/plate_1.gcode", f"; printer_model = {printer_model}\nG28\n")
+        zf.writestr(
+            "Metadata/plate_1.gcode",
+            f"; printer_model = {printer_model}\n{gcode_extra}G28\n",
+        )
         zf.writestr(
             "Metadata/slice_info.config",
             '<config><metadata key="prediction" value="600"/><metadata key="weight" value="12"/></config>',
@@ -292,6 +299,38 @@ def write_studio_profile_tree(root: Path) -> Path:
         },
     )
     return root
+
+
+def write_kobra_flexypup_3mf(path: Path) -> Path:
+    """Printverse Kobra Max origin of fill-20260901-a1mini-flexypup.
+
+    5 colours, 400 mm bed, prime tower off, wipe_tower_y=220 — plus captured
+    + glue-in plates. This is the file class that leaked through --load-settings.
+    """
+    settings = {
+        "printer_model": "Anycubic Kobra 3 Max",
+        "printer_settings_id": "Anycubic Kobra 3 Max 0.4 nozzle",
+        "print_settings_id": "0.20mm Standard @Kobra3Max",
+        "printable_area": ["0x0", "400x0", "400x400", "0x400"],
+        "printable_height": "400",
+        "enable_prime_tower": "0",
+        "wipe_tower_x": "220",
+        "wipe_tower_y": "220",
+        "prime_tower_width": "35",
+        "filament_colour": "#80FF80;#FFFFFF;#0000FF;#6F5034;#FFFF00",
+    }
+    # Reuse the two-plate magnet mesh/settings, then inject Kobra project_settings.
+    write_two_plate_magnet_3mf(path)
+    tmp = path.with_suffix(".tmp.3mf")
+    with zipfile.ZipFile(path, "r") as zin, zipfile.ZipFile(tmp, "w") as zout:
+        for info in zin.infolist():
+            zout.writestr(info, zin.read(info.filename))
+        zout.writestr(
+            "Metadata/project_settings.config",
+            json.dumps(settings, indent=2) + "\n",
+        )
+    tmp.replace(path)
+    return path
 
 
 ASCII_CUBE = _ASCII_CUBE

@@ -252,6 +252,13 @@ def slice_for(
             )
 
 
+        process_flat: dict[str, Any] = {}
+        if cmd.flattened_process and Path(cmd.flattened_process).is_file():
+            try:
+                process_flat = json.loads(Path(cmd.flattened_process).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                process_flat = {}
+
         if dry_run:
             return SliceResult(
                 ok=True,
@@ -264,6 +271,10 @@ def slice_for(
                     "printer_model": flat.get("printer_model") or flat.get("name"),
                     "printable_area": flat.get("printable_area"),
                     "printable_height": flat.get("printable_height"),
+                    "enable_prime_tower": process_flat.get("enable_prime_tower"),
+                    "wipe_tower_x": process_flat.get("wipe_tower_x"),
+                    "wipe_tower_y": process_flat.get("wipe_tower_y"),
+                    "colors": getattr(cmd, "color_count", 1),
                 },
                 flattened_machine=str(cmd.flattened_machine) if cmd.flattened_machine else None,
                 detail="dry_run",
@@ -307,6 +318,9 @@ def slice_for(
         try:
             assert_sliced_artifact(output_path, spec.key)
         except ArtifactError as exc:
+            msg = str(exc)
+            if msg.startswith("REL-602"):
+                raise SliceError(msg) from exc
             raise SliceError(
                 f"slice wrote an artifact that does not match {spec.key}: {exc}"
             ) from exc
